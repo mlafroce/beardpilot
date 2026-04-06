@@ -11,21 +11,20 @@ pub struct Session {
 }
 
 impl Session {
-    pub fn new(config: &AppConfig) -> Self {
+    pub async fn new(config: &AppConfig, ollama: Ollama) -> Result<Self, AppError> {
         let history = vec![];
         let model_info = ModelInfo::new(&config.model, config.max_tokens);
-        let ollama = Ollama::new(config.host.to_string(), config.port);
         let coordinator = Coordinator::new(ollama, config.model.clone(), history)
             .add_tool(Find::default())
             .add_tool(ListFiles::default())
             .add_tool(Read::default())
             .add_tool(Bash::default());
         let conversation = Conversation::new(config.system_prompt.clone(), config.max_history, model_info);
-        Self {
+        Ok(Self {
             messages: vec![],
             conversation,
             coordinator,
-        }
+        })
     }
 
     pub async fn submit(&mut self, text: String) -> Result<(), AppError> {
@@ -72,7 +71,7 @@ impl Session {
                 let mut response = String::new();
                 if let Some(thinking) = res.message.thinking {
                     if !thinking.is_empty() {
-                        self.messages.push(Message::info(&format!("(thinking)\n{}", thinking)));
+                        self.messages.push(Message::info(format!("(thinking)\n{}", thinking)));
                     }
                 }
                 response += &res.message.content;
@@ -80,7 +79,7 @@ impl Session {
                 self.conversation.add_assistant(response);
 
                 if let Some(data) = res.final_data {
-                    self.messages.push(Message::info(&format!(
+                    self.messages.push(Message::info(format!(
                         "Tokens sent: {} | received: {}",
                         data.prompt_eval_count, data.eval_count
                     )));

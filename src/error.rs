@@ -1,4 +1,5 @@
 use thiserror::Error;
+use ollama_rs::error::OllamaError;
 
 #[derive(Debug, Error)]
 pub enum AppError {
@@ -7,4 +8,7 @@ pub enum AppError {
 
     #[error("Config error: {0}")]
     Config(String),
+
+    #[error("Ollama error: {0}")]
+    Ollama(#[from] OllamaError),
 }

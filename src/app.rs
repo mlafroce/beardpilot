@@ -1,5 +1,7 @@
 use crossterm::event::EventStream;
 use futures_util::StreamExt;
+use ollama_rs::Ollama;
+use tracing::debug;
 
 use crate::chat::session::Session;
 use crate::config::AppConfig;
@@ -27,7 +29,11 @@ impl App {
     /// Run the interactive chat loop until the user exits.
     pub async fn run(&mut self) -> Result<(), AppError> {
         // Initial render
-        self.session = Some(Session::new(&self.config));
+        let ollama = Ollama::new(self.config.host.to_string(), self.config.port);
+        let models = ollama.list_local_models().await?;
+        debug!("Local models:");
+        debug!("{:?}", models);
+        self.session = Some(Session::new(&self.config, ollama).await?);
         self.redraw()?;
 
         let mut events = EventStream::new();
