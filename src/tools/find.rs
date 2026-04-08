@@ -1,7 +1,10 @@
 use ollama_rs::generation::tools::Tool;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+use tokio::sync::mpsc::UnboundedSender;
+use tracing::debug;
+
+use crate::event::SessionEvent;
 
 #[derive(Deserialize, JsonSchema)]
 pub struct Params {
@@ -13,8 +16,15 @@ pub struct Params {
     path: Option<String>,
 }
 
-#[derive(Default)]
-pub struct Find {}
+pub struct Find {
+    sender: UnboundedSender<SessionEvent>
+}
+
+impl Find {
+    pub fn new(sender: UnboundedSender<SessionEvent>) -> Self {
+        Self {sender}
+    }
+}
 
 impl Tool for Find {
     type Params = Params;
@@ -32,28 +42,9 @@ impl Tool for Find {
         parameters: Self::Params,
     ) -> Result<String, Box<dyn std::error::Error + Sync + Send>> {
         let search_path = parameters.path.as_deref().unwrap_or(".");
-
-        // Ask the user for confirmation before running grep
-        let mut stdout = tokio::io::stdout();
-        stdout
-            .write_all(
-                format!(
-                    "\n[confirm] Run Find: grep -rn {:?} in {:?}? [y/N] ",
-                    parameters.expression, search_path
-                )
-                .as_bytes(),
-            )
-            .await?;
-        stdout.flush().await?;
-
-        let mut line = String::new();
-        tokio::io::BufReader::new(tokio::io::stdin())
-            .read_line(&mut line)
-            .await?;
-
-        if !matches!(line.trim(), "y" | "Y") {
-            return Ok("Operation cancelled by user.".to_string());
-        }
+        //let (conf_sender, response) = tokio::sync::oneshot::channel();
+        //let prompt = format!("Confirm 'grep -rn {}'", parameters.expression);
+        //self.sender.send(SessionEvent::ConfirmationRequest{prompt, response: conf_sender}).unwrap();
 
         let output = tokio::process::Command::new("grep")
             .args(["-rn", &parameters.expression, search_path])
@@ -67,7 +58,7 @@ impl Tool for Find {
             Ok(format!("No matches found for '{}'", parameters.expression))
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-            Err(format!("grep failed: {}", stderr).into())
+            Ok(format!("grep failed: {}", stderr).into())
         }
     }
 }

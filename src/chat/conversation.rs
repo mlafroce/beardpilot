@@ -1,6 +1,7 @@
 use ollama_rs::generation::chat::ChatMessage;
 
 /// Metadata about the model being used in this conversation.
+#[derive(Default)]
 pub struct ModelInfo {
     pub model_name: String,
     pub max_tokens: Option<usize>,

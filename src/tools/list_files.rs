@@ -48,7 +48,7 @@ impl Tool for ListFiles {
             Ok(String::from_utf8_lossy(&output.stdout).into_owned())
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-            Err(format!("ls failed: {}", stderr).into())
+            Ok(format!("ls failed: {}", stderr).into())
         }
     }
 }

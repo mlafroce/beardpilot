@@ -27,22 +27,6 @@ impl Tool for Bash {
         &mut self,
         parameters: Self::Params,
     ) -> Result<String, Box<dyn std::error::Error + Sync + Send>> {
-        // Ask the user for confirmation before running cat
-        let mut stdout = tokio::io::stdout();
-        stdout
-            .write_all(format!("\n[confirm] Run ${:?}? [y/N] ", parameters.command,).as_bytes())
-            .await?;
-        stdout.flush().await?;
-
-        let mut line = String::new();
-        tokio::io::BufReader::new(tokio::io::stdin())
-            .read_line(&mut line)
-            .await?;
-
-        if !matches!(line.trim(), "y" | "Y") {
-            return Ok("Operation cancelled by user.".to_string());
-        }
-
         let output = tokio::process::Command::new("bash")
             .arg("-c")
             .arg(&parameters.command)
@@ -53,7 +37,7 @@ impl Tool for Bash {
             Ok(String::from_utf8_lossy(&output.stdout).into_owned())
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-            Err(format!("Bash execution failed: {}", stderr).into())
+            Ok(format!("Bash execution failed: {}", stderr).into())
         }
     }
 }

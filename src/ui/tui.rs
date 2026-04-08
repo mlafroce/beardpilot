@@ -15,9 +15,10 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Wrap},
     Frame, Terminal,
 };
+use tracing::debug;
 use std::io::{self, Stdout};
 
-use crate::{chat::conversation::{Message, ModelInfo, Role}, event::AppAction, ui::input::TextInput};
+use crate::{app::AppState, chat::conversation::{Message, ModelInfo, Role}, event::UiAction, ui::input::TextInput};
 
 pub struct Tui {
     terminal: Terminal<CrosstermBackend<Stdout>>,
@@ -38,8 +39,6 @@ impl Tui {
         execute!(
             stdout,
             EnterAlternateScreen,
-            EnableMouseCapture,
-            cursor::Hide
         )?;
         let backend = CrosstermBackend::new(stdout);
         let terminal = Terminal::new(backend)?;
@@ -72,22 +71,20 @@ impl Tui {
     /// * `model_info` – model metadata shown below the input box.
     pub fn draw(
         &mut self,
-        messages: &[Message],
-        thinking: bool,
-        model_info: &ModelInfo,
+        state: &AppState
     ) -> io::Result<()> {
         // We capture the two cached values from the draw call.
         let mut messages_area_height = self.messages_area_height;
         let mut total_messages_lines = self.total_messages_lines;
 
         // Build model status label outside the closure to avoid borrow issues.
-        let status_label = build_model_status(model_info);
+        let status_label = build_model_status(&state.model_info);
 
         self.terminal.draw(|frame| {
             let (msgs_area, input_area) = split_layout(frame.area());
             messages_area_height = msgs_area.height;
 
-            let lines = build_message_lines(messages, msgs_area.width.saturating_sub(2));
+            let lines = build_message_lines(&state.messages, msgs_area.width.saturating_sub(2));
             total_messages_lines = lines.len() as u16;
 
             let msgs_paragraph = Paragraph::new(lines)
@@ -101,7 +98,7 @@ impl Tui {
                 .scroll((self.scroll, 0));
             frame.render_widget(msgs_paragraph, msgs_area);
 
-            render_input(frame, input_area, &self.input, thinking, &status_label);
+            render_input(frame, input_area, &self.input, false, &status_label);
         })?;
 
         self.messages_area_height = messages_area_height;
@@ -110,18 +107,23 @@ impl Tui {
         Ok(())
     }
 
-    pub fn handle_event(&mut self, event: Event) -> AppAction {
+    pub fn confirmation(&mut self, prompt: String) -> bool {
+        debug!("Prompting {}", prompt);
+        true
+    }
+
+    pub fn handle_event(&mut self, event: Event) -> UiAction {
         match event {
             Event::Key(key) => self.handle_key(key),
             Event::Mouse(mouse) => {
                 self.handle_mouse(mouse)
             }
-            Event::Resize(_, _) => AppAction::Redraw,
-            _ => AppAction::None,
+            Event::Resize(_, _) => UiAction::Redraw,
+            _ => UiAction::None,
         }
     }
 
-    fn handle_key(&mut self, key: KeyEvent) -> AppAction {
+    fn handle_key(&mut self, key: KeyEvent) -> UiAction {
         // Global quit shortcuts always work, even while thinking
         if matches!(
             key,
@@ -135,7 +137,7 @@ impl Tui {
                 ..
             }
         ) {
-            return AppAction::Quit;
+            return UiAction::Quit;
         }
 
         //if self.thinking {
@@ -148,9 +150,9 @@ impl Tui {
                 let text = text.trim().to_string();
 
                 if text.is_empty() {
-                    return AppAction::None;
+                    return UiAction::None;
                 }
-                return AppAction::Submit(text);
+                return UiAction::Submit(text);
             }
             // editing
             KeyCode::Char(c) => {
@@ -192,10 +194,10 @@ impl Tui {
 
             _ => {}
         }
-        AppAction::Redraw
+        UiAction::Redraw
     }
 
-    pub fn handle_mouse(&mut self, mouse: MouseEvent) -> AppAction {
+    pub fn handle_mouse(&mut self, mouse: MouseEvent) -> UiAction {
         let input_area = self.input_area();
         let msgs_area = self.messages_area();
 
@@ -227,7 +229,7 @@ impl Tui {
 
             _ => {}
         }
-        AppAction::Redraw
+        UiAction::Redraw
     }
 
     // ── scroll helpers ─────────────────────────────────────────────────────
