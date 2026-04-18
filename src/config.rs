@@ -26,7 +26,7 @@ pub struct AppConfig {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            model: "qwen3.5-4b-8k:latest".to_string(),
+            model: "qwen3.5:0.8b".to_string(),
             host: "http://localhost".to_string(),
             port: 11434,
             system_prompt: None,

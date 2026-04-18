@@ -1,8 +1,8 @@
 use crossterm::{
     cursor,
     event::{
-        DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
-        MouseButton, MouseEvent, MouseEventKind,
+        DisableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent,
+        MouseEventKind,
     },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
@@ -15,10 +15,15 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Wrap},
     Frame, Terminal,
 };
-use tracing::debug;
 use std::io::{self, Stdout};
+use tracing::debug;
 
-use crate::{app::AppState, chat::conversation::{Message, ModelInfo, Role}, event::UiAction, ui::input::TextInput};
+use crate::{
+    app::AppState,
+    chat::conversation::{Conversation, ModelInfo, ResponseStatus, Role},
+    event::UiAction,
+    ui::input::TextInput,
+};
 
 pub struct Tui {
     terminal: Terminal<CrosstermBackend<Stdout>>,
@@ -36,10 +41,7 @@ impl Tui {
     pub fn new() -> io::Result<Self> {
         enable_raw_mode()?;
         let mut stdout = io::stdout();
-        execute!(
-            stdout,
-            EnterAlternateScreen,
-        )?;
+        execute!(stdout, EnterAlternateScreen,)?;
         let backend = CrosstermBackend::new(stdout);
         let terminal = Terminal::new(backend)?;
         Ok(Self {
@@ -69,10 +71,7 @@ impl Tui {
     /// * `messages`   – chat history to display.
     /// * `thinking`   – when `true` a "thinking…" indicator replaces the cursor.
     /// * `model_info` – model metadata shown below the input box.
-    pub fn draw(
-        &mut self,
-        state: &AppState
-    ) -> io::Result<()> {
+    pub fn draw(&mut self, state: &AppState) -> io::Result<()> {
         // We capture the two cached values from the draw call.
         let mut messages_area_height = self.messages_area_height;
         let mut total_messages_lines = self.total_messages_lines;
@@ -84,7 +83,7 @@ impl Tui {
             let (msgs_area, input_area) = split_layout(frame.area());
             messages_area_height = msgs_area.height;
 
-            let lines = build_message_lines(&state.messages, msgs_area.width.saturating_sub(2));
+            let lines = build_message_lines(&state.conversation, msgs_area.width.saturating_sub(2));
             total_messages_lines = lines.len() as u16;
 
             let msgs_paragraph = Paragraph::new(lines)
@@ -98,7 +97,8 @@ impl Tui {
                 .scroll((self.scroll, 0));
             frame.render_widget(msgs_paragraph, msgs_area);
 
-            render_input(frame, input_area, &self.input, false, &status_label);
+            let res_status = state.conversation.response_status();
+            render_input(frame, input_area, &self.input, res_status, &status_label);
         })?;
 
         self.messages_area_height = messages_area_height;
@@ -107,18 +107,10 @@ impl Tui {
         Ok(())
     }
 
-    pub fn confirmation(&mut self, prompt: String) -> bool {
-        debug!("Prompting {}", prompt);
-        true
-    }
-
     pub fn handle_event(&mut self, event: Event) -> UiAction {
         match event {
             Event::Key(key) => self.handle_key(key),
-            Event::Mouse(mouse) => {
-                self.handle_mouse(mouse)
-            }
-            Event::Resize(_, _) => UiAction::Redraw,
+            Event::Mouse(mouse) => self.handle_mouse(mouse),
             _ => UiAction::None,
         }
     }
@@ -194,7 +186,7 @@ impl Tui {
 
             _ => {}
         }
-        UiAction::Redraw
+        UiAction::None
     }
 
     pub fn handle_mouse(&mut self, mouse: MouseEvent) -> UiAction {
@@ -229,7 +221,7 @@ impl Tui {
 
             _ => {}
         }
-        UiAction::Redraw
+        UiAction::None
     }
 
     // ── scroll helpers ─────────────────────────────────────────────────────
@@ -302,10 +294,10 @@ fn split_layout(area: Rect) -> (Rect, Rect) {
 ///
 /// Long messages are pre-wrapped at `max_width` columns so the scroll-line
 /// count stays accurate.
-fn build_message_lines(messages: &[Message], max_width: u16) -> Vec<Line<'static>> {
+fn build_message_lines(conversation: &Conversation, max_width: u16) -> Vec<Line<'static>> {
     let mut lines: Vec<Line<'static>> = Vec::new();
 
-    for msg in messages {
+    for msg in conversation.messages() {
         let (prefix, prefix_style, text_style) = match msg.role {
             Role::User => (
                 "You  │ ",
@@ -322,14 +314,21 @@ fn build_message_lines(messages: &[Message], max_width: u16) -> Vec<Line<'static
                 Style::default().fg(Color::White),
             ),
             Role::Info => (
-                "info │ ",
+                "Info │ ",
                 Style::default().fg(Color::Yellow),
                 Style::default().fg(Color::DarkGray),
             ),
             Role::Error => (
-                "err  │ ",
+                "Err  │ ",
                 Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
                 Style::default().fg(Color::Red),
+            ),
+            Role::Thinking => (
+                "Think│ ",
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(Color::DarkGray),
             ),
         };
 
@@ -401,7 +400,7 @@ fn render_input(
     frame: &mut Frame,
     area: Rect,
     input: &TextInput,
-    thinking: bool,
+    res_status: ResponseStatus,
     status_label: &str,
 ) {
     // Split the area: top 3 rows → input box, bottom 1 row → status line.
@@ -413,10 +412,10 @@ fn render_input(
     let status_area = chunks[1];
 
     // ── input box ──────────────────────────────────────────────────────────
-    let title = if thinking {
-        " thinking… "
-    } else {
-        " message "
+    let title = match res_status {
+        ResponseStatus::ReceiveResponse => " reading ",
+        ResponseStatus::Thinking => " thinking ",
+        ResponseStatus::Waiting => " message "
     };
     let block = Block::default().borders(Borders::ALL).title(title);
     let inner = block.inner(box_area);
@@ -429,7 +428,7 @@ fn render_input(
     frame.render_widget(paragraph, box_area);
 
     // Position the real terminal cursor (only when not in thinking mode)
-    if !thinking {
+    if res_status == ResponseStatus::Waiting {
         let cursor_x = inner.x + prompt_len + input.cursor() as u16;
         let cursor_x = cursor_x.min(inner.x + inner.width.saturating_sub(1));
         frame.set_cursor_position((cursor_x, inner.y));

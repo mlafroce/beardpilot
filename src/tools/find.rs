@@ -17,12 +17,12 @@ pub struct Params {
 }
 
 pub struct Find {
-    sender: UnboundedSender<SessionEvent>
+    sender: UnboundedSender<SessionEvent>,
 }
 
 impl Find {
     pub fn new(sender: UnboundedSender<SessionEvent>) -> Self {
-        Self {sender}
+        Self { sender }
     }
 }
 

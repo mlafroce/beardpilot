@@ -1,37 +1,35 @@
-use ollama_rs::error::OllamaError;
-use ollama_rs::generation::chat::ChatMessageResponse;
-use ollama_rs::{coordinator::Coordinator, generation::chat::ChatMessage, Ollama};
-use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender, unbounded_channel};
-use tracing::debug;
-use crate::chat::conversation::{Conversation, Message, ModelInfo};
+use crate::chat::conversation::{Conversation, ModelInfo};
 use crate::config::AppConfig;
 use crate::error::AppError;
 use crate::event::{AppEvent, SessionEvent};
-use crate::tools::{bash::Bash, find::Find, list_files::ListFiles, read::Read};
+use futures_util::StreamExt;
+use ollama_rs::Ollama;
+use ollama_rs::generation::chat::request::ChatMessageRequest;
+use tokio::sync::mpsc::{self, unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tracing::debug;
 
 pub struct Session {
-    pub messages: Vec<Message>,
-    pub conversation: Conversation,
-    coordinator: Coordinator<Vec<ChatMessage>>,
+    ollama: Ollama,
+    model: String,
     sender: UnboundedSender<SessionEvent>,
-    receiver: UnboundedReceiver<SessionEvent>
+    receiver: UnboundedReceiver<SessionEvent>,
 }
 
 impl Session {
     pub fn new(config: &AppConfig, ollama: Ollama) -> Result<Self, AppError> {
         let (sender, receiver) = unbounded_channel();
-        let history = vec![];
         let model_info = ModelInfo::new(&config.model, config.max_tokens);
+        /*
         let coordinator = Coordinator::new(ollama, config.model.clone(), history)
             .add_tool(Find::new(sender.clone()))
             .add_tool(ListFiles::default())
             .add_tool(Read::default())
-            .add_tool(Bash::default());
-        let conversation = Conversation::new(config.system_prompt.clone(), config.max_history, model_info);
+            .add_tool(Bash::default())
+            .debug(true);
+         */
         Ok(Self {
-            messages: vec![],
-            conversation,
-            coordinator,
+            ollama,
+            model: config.model.clone(),
             sender,
             receiver,
         })
@@ -44,9 +42,9 @@ impl Session {
     pub async fn run(mut self) {
         while let Some(message) = self.receiver.recv().await {
             match message {
-                SessionEvent::SubmitPrompt(text, resp_sender) => {
+                SessionEvent::SubmitPrompt(conversation, resp_sender) => {
                     debug!("SessionEvent::SubmitPrompt");
-                    let resp = self.submit(text, &resp_sender).await;
+                    let resp = self.send_chat(conversation, &resp_sender).await;
                     let _ = resp_sender.send(AppEvent::SubmitResponse(resp));
                 }
                 SessionEvent::ConfirmationRequest { prompt, response } => {
@@ -57,7 +55,11 @@ impl Session {
         }
     }
 
-    pub async fn submit(&mut self, text: String, app_sender: &mpsc::UnboundedSender<AppEvent>) -> Result<ChatMessageResponse, AppError> {
+    pub async fn send_chat(
+        &mut self,
+        conversation: Conversation,
+        app_sender: &mpsc::UnboundedSender<AppEvent>,
+    ) -> Result<String, AppError> {
         // Handle slash-commands
         /*
         match text.as_str() {
@@ -89,45 +91,17 @@ impl Session {
         }
         */
 
-        let user_msg = Message::user(&text);
-        self.push_msg(user_msg, app_sender);
-        self.conversation.add_user(text);
-
-        debug!("SessionEvent::submit, calling coordinator");
-        let response = self.coordinator.chat(self.conversation.messages()).await;
-        self.handle_submit_response(&response, app_sender);
-        Ok(response?)
-    }
-
-    fn push_msg(&mut self, msg: Message, app_sender: &mpsc::UnboundedSender<AppEvent>) {
-        let _ = app_sender.send(AppEvent::MessageAdded(msg.clone()));
-        self.messages.push(msg);
-    }
-
-    pub fn handle_submit_response(&mut self, response: &Result<ChatMessageResponse, OllamaError>, app_sender: &mpsc::UnboundedSender<AppEvent>) {
-        match response {
-            Ok(res) => {
-                let mut content = String::new();
-                if let Some(thinking) = &res.message.thinking {
-                    if !thinking.is_empty() {
-                        self.push_msg(Message::info(format!("(thinking)\n{}", thinking)), app_sender);
-                    }
-                }
-                content += &res.message.content;
-                self.push_msg(Message::assistant(&content), app_sender);
-                self.conversation.add_assistant(content);
-
-                if let Some(data) = &res.final_data {
-                    self.push_msg(Message::info(format!(
-                        "Tokens sent: {} | received: {}",
-                        data.prompt_eval_count, data.eval_count
-                    )), app_sender);
-                }
-            }
-            Err(e) => {
-                self.conversation.pop_last_user();
-                self.push_msg(Message::error(e.to_string()), app_sender);
-            }
+        debug!("SessionEvent::submit, calling ollama");
+        let request = ChatMessageRequest::new(self.model.clone(), conversation.client_messages());
+        let mut response = self.ollama.send_chat_messages_stream(request).await?;
+        let mut final_response = String::new();
+        while let Some(chunk) = response.next().await {
+            let _ = app_sender.send(AppEvent::ResponseChunk(
+                chunk.clone().expect("Invalid chunk"),
+            ));
+            final_response.push_str(&chunk.unwrap().message.content);
         }
+        //self.handle_submit_response(&response, app_sender);
+        Ok(final_response)
     }
 }

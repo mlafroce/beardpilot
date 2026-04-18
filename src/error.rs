@@ -1,5 +1,5 @@
-use thiserror::Error;
 use ollama_rs::error::OllamaError;
+use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum AppError {

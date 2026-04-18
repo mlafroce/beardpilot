@@ -1,11 +1,11 @@
 use crossterm::event::EventStream;
 use futures_util::StreamExt;
 use ollama_rs::Ollama;
-use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio::task::JoinSet;
 use tracing::debug;
 
-use crate::chat::conversation::{Message, ModelInfo};
+use crate::chat::conversation::{Conversation, ModelInfo};
 use crate::chat::session::Session;
 use crate::config::AppConfig;
 use crate::error::AppError;
@@ -14,9 +14,8 @@ use crate::ui::tui::Tui;
 
 #[derive(Default)]
 pub struct AppState {
-    pub messages: Vec<Message>,
+    pub conversation: Conversation,
     pub model_info: ModelInfo,
-    //running_status
 }
 
 /// Top-level application struct that owns all components and drives the main loop.
@@ -30,11 +29,7 @@ impl App {
     pub fn new(config: AppConfig) -> Result<Self, AppError> {
         let tui = Tui::new().map_err(AppError::Io)?;
         let state = Default::default();
-        Ok(Self {
-            config,
-            tui,
-            state,
-        })
+        Ok(Self { config, tui, state })
     }
 
     /// Run the interactive chat loop until the user exits.
@@ -52,7 +47,12 @@ impl App {
         tokio::spawn(async move {
             let mut events = EventStream::new();
             while let Some(event) = events.next().await {
-                if sender_clone.send(AppEvent::UiEvent(event.unwrap())).is_err() { break; }
+                if sender_clone
+                    .send(AppEvent::UiEvent(event.unwrap()))
+                    .is_err()
+                {
+                    break;
+                }
             }
         });
 
@@ -65,17 +65,14 @@ impl App {
                     match action {
                         UiAction::Quit => break,
                         UiAction::Submit(text) => {
-                            debug!("Submitted: {text}");
-                            let _ = session_sender.send(SessionEvent::SubmitPrompt(text, sender.clone()));
-                        }
-                        UiAction::Redraw => {
-                            self.redraw()?;
+                            self.state.conversation.push_user(text);
+                            let _ = session_sender.send(SessionEvent::SubmitPrompt(
+                                self.state.conversation.clone(),
+                                sender.clone(),
+                            ));
                         }
                         _ => {}
                     }
-                },
-                Some(AppEvent::MessageAdded(msg)) => {
-                    self.state.messages.push(msg);
                     self.redraw()?;
                 }
                 Some(AppEvent::SubmitResponse(response)) => {
@@ -84,13 +81,21 @@ impl App {
                         debug!("Submit error: {:?}", e);
                     }
                 }
+                Some(AppEvent::ResponseChunk(response)) => {
+                    self.state.conversation.push_chunk(response);
+                    self.redraw()?;
+                }
                 _ => {}
             }
-        };
+        }
         Ok(())
     }
 
-    fn spawn_session_actor(tasks: &mut JoinSet<()>, config: AppConfig, ollama: Ollama) -> UnboundedSender<SessionEvent> {
+    fn spawn_session_actor(
+        tasks: &mut JoinSet<()>,
+        config: AppConfig,
+        ollama: Ollama,
+    ) -> UnboundedSender<SessionEvent> {
         let actor = Session::new(&config, ollama).unwrap();
         let sender = actor.get_sender();
         tasks.spawn(actor.run());
@@ -98,9 +103,7 @@ impl App {
     }
 
     fn redraw(&mut self) -> Result<(), AppError> {
-        self.tui
-            .draw(&self.state)
-            .map_err(AppError::Io)?;
+        self.tui.draw(&self.state).map_err(AppError::Io)?;
         Ok(())
     }
 }
