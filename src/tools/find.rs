@@ -1,4 +1,4 @@
-use ollama_rs::generation::tools::Tool;
+use ollama_minapi::generation::tools::Tool;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tokio::sync::mpsc::UnboundedSender;

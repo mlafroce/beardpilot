@@ -1,37 +1,45 @@
-use ollama_rs::generation::tools::Tool;
+use ollama_minapi::endpoint::tool::{ParamTypedTool, Tool};
 use schemars::JsonSchema;
 use serde::Deserialize;
 
 #[derive(Deserialize, JsonSchema)]
-pub struct Params {
-    #[schemars(
-        description = "Path folder to list. Defaults to current directory if not provided."
-    )]
+pub struct ListFilesParams {
     path: Option<String>,
-    #[schemars(description = "Show hidden files")]
-    show_hidden: Option<bool>,
+    show_hidden: bool,
 }
 
 #[derive(Default)]
-pub struct ListFiles {}
+pub struct ListFiles;
+
+#[derive(Debug, thiserror::Error)]
+pub enum ListFilesError {
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("UTF-8 error: {0}")]
+    Utf8(#[from] std::string::FromUtf8Error),
+}
 
 impl Tool for ListFiles {
-    type Params = Params;
-
-    fn name() -> &'static str {
+    fn name(&self) -> &'static str {
         "ListFiles"
     }
 
-    fn description() -> &'static str {
+    fn description(&self) -> &'static str {
         "Lists files in a folder"
     }
 
-    async fn call(
-        &mut self,
-        parameters: Self::Params,
-    ) -> Result<String, Box<dyn std::error::Error + Sync + Send>> {
+    fn params_schema(&self) -> schemars::Schema {
+        schemars::schema_for!(ListFilesParams)
+    }
+}
+
+impl ParamTypedTool for ListFiles {
+    type Params = ListFilesParams;
+    type Error = ListFilesError;
+
+    async fn call(&mut self, parameters: Self::Params) -> Result<String, Self::Error> {
         let path = parameters.path.as_deref().unwrap_or(".");
-        let show_hidden = parameters.show_hidden.unwrap_or(false);
+        let show_hidden = parameters.show_hidden;
 
         let mut args = vec!["-1"];
         if show_hidden {

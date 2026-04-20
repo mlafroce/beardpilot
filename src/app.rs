@@ -1,21 +1,19 @@
 use crossterm::event::EventStream;
 use futures_util::StreamExt;
-use ollama_rs::Ollama;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
+use ollama_minapi::Ollama;
+use tokio::sync::mpsc::{self, UnboundedSender, unbounded_channel};
 use tokio::task::JoinSet;
 use tracing::debug;
 
-use crate::chat::conversation::{Conversation, ModelInfo};
+use crate::chat::conversation::{self, Conversation, ModelInfo};
 use crate::chat::session::Session;
 use crate::config::AppConfig;
 use crate::error::AppError;
 use crate::event::{AppEvent, SessionEvent, UiAction};
 use crate::ui::tui::Tui;
 
-#[derive(Default)]
 pub struct AppState {
     pub conversation: Conversation,
-    pub model_info: ModelInfo,
 }
 
 /// Top-level application struct that owns all components and drives the main loop.
@@ -28,26 +26,27 @@ pub struct App {
 impl App {
     pub fn new(config: AppConfig) -> Result<Self, AppError> {
         let tui = Tui::new().map_err(AppError::Io)?;
-        let state = Default::default();
+        let model_info = ModelInfo { model_name: config.model.clone(), max_tokens: None };
+        let conversation = Conversation::new(config.system_prompt.clone(), model_info);
+        let state = AppState { conversation };
         Ok(Self { config, tui, state })
     }
 
     /// Run the interactive chat loop until the user exits.
     pub async fn run(&mut self) -> Result<(), AppError> {
         // Initial render
-        let ollama = Ollama::new(self.config.host.to_string(), self.config.port);
-        let models = ollama.list_local_models().await?;
-        debug!("Local models:");
-        debug!("{:?}", models);
+        let ollama = Ollama::new(&self.config.host, self.config.port)?;
+        //let models = ollama.list_local_models().await?;
+        //debug!("Local models:");
+        //debug!("{:?}", models);
         let (sender, mut receiver) = unbounded_channel();
         let mut tasks = tokio::task::JoinSet::new();
-        let session_sender = App::spawn_session_actor(&mut tasks, self.config.clone(), ollama);
+        let session_sender = App::spawn_session_actor(&mut tasks, ollama, sender.clone());
 
-        let sender_clone = sender.clone();
         tokio::spawn(async move {
             let mut events = EventStream::new();
             while let Some(event) = events.next().await {
-                if sender_clone
+                if sender
                     .send(AppEvent::UiEvent(event.unwrap()))
                     .is_err()
                 {
@@ -66,9 +65,8 @@ impl App {
                         UiAction::Quit => break,
                         UiAction::Submit(text) => {
                             self.state.conversation.push_user(text);
-                            let _ = session_sender.send(SessionEvent::SubmitPrompt(
-                                self.state.conversation.clone(),
-                                sender.clone(),
+                            let _ = session_sender.send(SessionEvent::SendChat(
+                                self.state.conversation.session_chat()
                             ));
                         }
                         _ => {}
@@ -83,6 +81,7 @@ impl App {
                 }
                 Some(AppEvent::ResponseChunk(response)) => {
                     self.state.conversation.push_chunk(response);
+                    self.tui.scroll_to_bottom();
                     self.redraw()?;
                 }
                 _ => {}
@@ -93,10 +92,10 @@ impl App {
 
     fn spawn_session_actor(
         tasks: &mut JoinSet<()>,
-        config: AppConfig,
         ollama: Ollama,
+        app_sender: mpsc::UnboundedSender<AppEvent>,
     ) -> UnboundedSender<SessionEvent> {
-        let actor = Session::new(&config, ollama).unwrap();
+        let actor = Session::new(ollama, app_sender).unwrap();
         let sender = actor.get_sender();
         tasks.spawn(actor.run());
         sender

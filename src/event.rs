@@ -1,18 +1,17 @@
 use crossterm::event::Event;
-use ollama_rs::generation::chat::ChatMessageResponse;
+use ollama_minapi::endpoint::chat::{Chat, ChatResponse};
 use tokio::sync::{mpsc, oneshot};
 
-use crate::chat::conversation::Conversation;
 use crate::error::AppError;
 
 pub enum AppEvent {
     UiEvent(Event),
-    ResponseChunk(ChatMessageResponse),
+    ResponseChunk(ChatResponse),
     SubmitResponse(Result<String, AppError>),
 }
 
 pub enum SessionEvent {
-    SubmitPrompt(Conversation, mpsc::UnboundedSender<AppEvent>),
+    SendChat(Chat),
     ConfirmationRequest {
         prompt: String,
         response: oneshot::Sender<bool>,

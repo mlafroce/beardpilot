@@ -1,4 +1,9 @@
-use ollama_rs::generation::chat::{ChatMessage, ChatMessageResponse};
+use ollama_minapi::endpoint::{
+    chat::{Chat, ChatResponse, Message},
+    tool::{tool_to_json, Tool},
+};
+
+use crate::tools::list_files::ListFiles;
 
 #[derive(Clone, Default, PartialEq)]
 pub enum ResponseStatus {
@@ -34,12 +39,12 @@ pub enum Role {
 }
 
 #[derive(Clone)]
-pub struct Message {
+pub struct ConversationMessage {
     pub role: Role,
     pub text: String,
 }
 
-impl Message {
+impl ConversationMessage {
     pub fn user(text: impl Into<String>) -> Self {
         Self {
             role: Role::User,
@@ -73,11 +78,11 @@ impl Message {
 }
 
 /// Owns the chat history and injects a system prompt when present.
-#[derive(Clone, Default)]
 pub struct Conversation {
-    messages: Vec<Message>,
+    messages: Vec<ConversationMessage>,
     system_prompt: Option<String>,
-    model_info: ModelInfo,
+    pub model_info: ModelInfo,
+    tools: Vec<Box<dyn Tool>>,
     response_status: ResponseStatus,
 }
 
@@ -85,6 +90,7 @@ impl Conversation {
     pub fn new(system_prompt: Option<String>, model_info: ModelInfo) -> Self {
         Self {
             messages: vec![],
+            tools: vec![Box::new(ListFiles {})],
             system_prompt,
             model_info,
             response_status: ResponseStatus::Waiting,
@@ -97,23 +103,23 @@ impl Conversation {
     }
 
     pub fn push_user(&mut self, text: String) {
-        let msg = Message::user(text);
+        let msg = ConversationMessage::user(text);
         self.messages.push(msg);
     }
 
     /// Add a response chunk
-    pub fn push_chunk(&mut self, response: ChatMessageResponse) {
-        if let Some(thinking) = &response.message.thinking {
+    pub fn push_chunk(&mut self, response: ChatResponse) {
+        if !response.message.thinking.is_empty() {
             if self.response_status != ResponseStatus::Thinking {
-                let msg = Message::thinking("");
+                let msg = ConversationMessage::thinking("");
                 self.messages.push(msg);
             }
             let message = self.messages.last_mut().unwrap();
-            message.text.push_str(&thinking);
+            message.text.push_str(&response.message.thinking);
             self.response_status = ResponseStatus::Thinking;
         } else {
             if self.response_status != ResponseStatus::ReceiveResponse {
-                let msg = Message::assistant("");
+                let msg = ConversationMessage::assistant("");
                 self.messages.push(msg);
             }
             let message = self.messages.last_mut().unwrap();
@@ -121,7 +127,7 @@ impl Conversation {
             self.response_status = ResponseStatus::ReceiveResponse;
         }
         if let Some(data) = &response.final_data {
-            self.messages.push(Message::info(format!(
+            self.messages.push(ConversationMessage::info(format!(
                 "Tokens sent: {} | received: {}",
                 data.prompt_eval_count, data.eval_count
             )));
@@ -132,25 +138,39 @@ impl Conversation {
     }
 
     /// Return the full message list
-    pub fn messages(&self) -> &[Message] {
+    pub fn messages(&self) -> &[ConversationMessage] {
         &self.messages
     }
 
-    /// 
+    ///
     pub fn response_status(&self) -> ResponseStatus {
         self.response_status.clone()
     }
 
-    /// Return the filtered message list to be sent to the model,
-    /// prepending the system prompt when configured.
-    pub fn client_messages(&self) -> Vec<ChatMessage> {
-        let mut all: Vec<ChatMessage> = Vec::with_capacity(self.messages.len() + 1);
+    pub fn session_chat(&self) -> Chat {
+        let messages = self.session_messages();
+        let model = self.model_info.model_name.clone();
+        let tools = self
+            .tools
+            .iter()
+            .map(|t| tool_to_json(t.as_ref()))
+            .collect();
+        Chat {
+            model,
+            messages,
+            tools,
+            ..Default::default()
+        }
+    }
+
+    fn session_messages(&self) -> Vec<Message> {
+        let mut all: Vec<Message> = Vec::with_capacity(self.messages.len() + 1);
         if let Some(ref prompt) = self.system_prompt {
-            all.push(ChatMessage::system(prompt.clone()));
+            all.push(Message::system(prompt.clone()));
         }
         all.extend(self.messages.iter().filter_map(|m| match m.role {
-            Role::User => Some(ChatMessage::user(m.text.clone())),
-            Role::Assistant => Some(ChatMessage::assistant(m.text.clone())),
+            Role::User => Some(Message::user(m.text.clone())),
+            Role::Assistant => Some(Message::assistant(m.text.clone())),
             _ => None,
         }));
         all

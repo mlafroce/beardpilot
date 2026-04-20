@@ -4,13 +4,13 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+ollama-minapi = { path = "../ollama-minapi", features = ["stream"] }
 futures-util = "0.3.32"
-ollama-rs = { version = "0.3.4", features = ["stream"] }
+thiserror = "2.0.18"
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1.51.0", features = ["full"] }
 tokio-stream = { version = "0.1.18", features = ["io-util"] }
-thiserror = "1"
 toml = "0.8"
 dirs = "5"
 schemars = "1.2.1"

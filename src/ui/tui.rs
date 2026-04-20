@@ -77,7 +77,7 @@ impl Tui {
         let mut total_messages_lines = self.total_messages_lines;
 
         // Build model status label outside the closure to avoid borrow issues.
-        let status_label = build_model_status(&state.model_info);
+        let status_label = build_model_status(&state.conversation.model_info);
 
         self.terminal.draw(|frame| {
             let (msgs_area, input_area) = split_layout(frame.area());
@@ -238,7 +238,7 @@ impl Tui {
     }
 
     /// Scroll the messages pane to the very bottom.
-    fn scroll_to_bottom(&mut self) {
+    pub fn scroll_to_bottom(&mut self) {
         let total = self.total_messages_lines();
         let visible = self.messages_area_height();
         self.scroll = total.saturating_sub(visible);
@@ -415,7 +415,7 @@ fn render_input(
     let title = match res_status {
         ResponseStatus::ReceiveResponse => " reading ",
         ResponseStatus::Thinking => " thinking ",
-        ResponseStatus::Waiting => " message "
+        ResponseStatus::Waiting => " message ",
     };
     let block = Block::default().borders(Borders::ALL).title(title);
     let inner = block.inner(box_area);

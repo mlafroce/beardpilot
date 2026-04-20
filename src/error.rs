@@ -1,4 +1,4 @@
-use ollama_rs::error::OllamaError;
+use ollama_minapi::endpoint::EndpointError;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -10,5 +10,5 @@ pub enum AppError {
     Config(String),
 
     #[error("Ollama error: {0}")]
-    Ollama(#[from] OllamaError),
+    Ollama(#[from] EndpointError),
 }
