@@ -1,4 +1,4 @@
-use ollama_minapi::endpoint::EndpointError;
+use beardpilot_api::endpoint::EndpointError;
 use thiserror::Error;
 
 #[derive(Debug, Error)]

@@ -1,4 +1,4 @@
-use ollama_minapi::generation::tools::Tool;
+use beardpilot_api::generation::tools::Tool;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tokio::sync::mpsc::UnboundedSender;

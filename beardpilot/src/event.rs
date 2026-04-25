@@ -1,13 +1,10 @@
+use beardpilot_api::endpoint::chat::{Chat, ChatResponse};
 use crossterm::event::Event;
-use ollama_minapi::endpoint::chat::{Chat, ChatResponse};
-use tokio::sync::{mpsc, oneshot};
-
-use crate::error::AppError;
+use tokio::sync::oneshot;
 
 pub enum AppEvent {
     UiEvent(Event),
     ResponseChunk(ChatResponse),
-    SubmitResponse(Result<String, AppError>),
 }
 
 pub enum SessionEvent {

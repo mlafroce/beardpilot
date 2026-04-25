@@ -5,7 +5,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Debug unit tests in library 'ollama_minapi'",
+            "name": "Debug unit tests in library 'beardpilot_api'",
             "type": "lldb",
             "request": "launch",
             "cargo": {

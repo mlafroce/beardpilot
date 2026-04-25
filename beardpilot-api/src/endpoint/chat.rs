@@ -16,9 +16,11 @@ pub struct Chat {
     pub tools: Vec<serde_json::Value>,
 
     /// Format to return a response in. Can be `json` or a JSON schema
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub format: String,
 
     /// Runtime options that control text generation
+    #[serde(skip_serializing_if = "CallOptions::is_empty")]
     pub options: CallOptions,
 
     pub stream: bool,
@@ -75,6 +77,19 @@ pub struct CallOptions {
     pub num_predict: Option<i64>,
 }
 
+impl CallOptions {
+    pub fn is_empty(&self) -> bool {
+        self.min_p.is_none()
+            && self.num_ctx.is_none()
+            && self.num_predict.is_none()
+            && self.seed.is_none()
+            && self.stop.is_none()
+            && self.temperature.is_none()
+            && self.top_k.is_none()
+            && self.top_p.is_none()
+    }
+}
+
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MessageRole {
@@ -85,17 +100,22 @@ pub enum MessageRole {
 }
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FinishReason {
+    Stop,
+    Length,
+    ToolCalls,
+}
+
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct Message {
     /// Author of the message.
-    pub role: MessageRole,
+    /// In streams might not be present after first chunk.
+    pub role: Option<MessageRole>,
 
     /// Message text content
     #[serde(default)]
     pub content: String,
-
-    /// Optional deliberate thinking trace when `think` is enabled
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub thinking: String,
 
     /// List of inline images for multimodal models
     /// Base64-encoded image content
@@ -109,51 +129,95 @@ pub struct Message {
 
 impl Message {
     pub fn system(content: String) -> Self {
-        Self {role: MessageRole::System, content, thinking: String::new(), images: vec![], tool_calls: vec![]}
+        Self {
+            role: Some(MessageRole::System),
+            content,
+            images: vec![],
+            tool_calls: vec![],
+        }
     }
 
     pub fn user(content: String) -> Self {
-        Self {role: MessageRole::User, content, thinking: String::new(), images: vec![], tool_calls: vec![]}
+        Self {
+            role: Some(MessageRole::User),
+            content,
+            images: vec![],
+            tool_calls: vec![],
+        }
     }
 
     pub fn assistant(content: String) -> Self {
-        Self {role: MessageRole::Assistant, content, thinking: String::new(), images: vec![], tool_calls: vec![]}
+        Self {
+            role: Some(MessageRole::Assistant),
+            content,
+            images: vec![],
+            tool_calls: vec![],
+        }
     }
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct ResponseMessage {
+    /// Optional deliberate thinking trace when `think` is enabled
+    #[serde(default)]
+    pub thinking: String,
+
+    #[serde(flatten)]
+    pub message: Message,
 }
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct ToolCall {
     id: String,
-    function: ToolCallFunction
+    function: ToolCallFunction,
 }
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct ToolCallFunction {
     index: Value,
     name: String,
-    arguments: HashMap<String, Value>
+    arguments: HashMap<String, Value>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct ChatResponse {
+    /// Unique identifier for the response
+    #[serde(default)]
+    pub id: String,
+
+    /// Object type (e.g., "chat.completion.chunk")
+    #[serde(default)]
+    pub object: String,
+
     ///Model name
     pub model: String,
 
     ///ISO 8601 timestamp of response creation
-    pub created_at: String,
+    pub created: i64,
 
     ///The model's generated text response
-    pub message: Message,
+    //pub message: Message,
+    pub choices: Vec<MessageChunk>,
 
     ///Indicates whether generation has finished
+    #[serde(default)]
     pub done: bool,
 
     ///Reason the generation stopped
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub done_reason: Option<String>,
 
-    #[serde(flatten, skip_serializing_if = "Option::is_none")]
+    #[serde(flatten, default, skip_serializing_if = "Option::is_none")]
     pub final_data: Option<ChatMessageFinalResponseData>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct MessageChunk {
+    pub index: i64,
+    pub delta: ResponseMessage,
+    ///Indicates whether generation has finished
+    #[serde(default)]
+    pub finish_reason: Option<FinishReason>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -175,4 +239,26 @@ pub struct ChatMessageFinalResponseData {
 
     ///Time spent generating tokens in nanoseconds
     pub eval_duration: i64,
+}
+
+impl ChatResponse {
+    pub fn thinking(&self) -> &str {
+        &self.choices[0].delta.thinking
+    }
+
+    pub fn content(&self) -> &str {
+        &self.choices[0].delta.message.content
+    }
+
+    pub fn role(&self) -> &Option<MessageRole> {
+        &self.choices[0].delta.message.role
+    }
+
+    pub fn done(&self) -> Option<FinishReason> {
+        if self.done {
+            Some(FinishReason::Stop)
+        } else {
+            self.choices[0].finish_reason.clone()
+        }
+    }
 }

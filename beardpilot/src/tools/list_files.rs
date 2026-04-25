@@ -1,4 +1,4 @@
-use ollama_minapi::endpoint::tool::{ParamTypedTool, Tool};
+use beardpilot_api::endpoint::tool::{ParamTypedTool, Tool};
 use schemars::JsonSchema;
 use serde::Deserialize;
 

@@ -9,10 +9,10 @@ const CONFIG_FOLDER: &str = "beardpilot";
 pub struct AppConfig {
     /// Ollama model identifier to use for chat
     pub model: String,
-    /// Ollama server host (e.g. "http://localhost")
+    /// Ollama server host (e.g. "http://localhost:11434")
     pub host: String,
-    /// Ollama server port
-    pub port: u16,
+    /// Optional api-key
+    pub api_key: Option<String>,
     /// Optional system prompt injected at the start of every conversation
     pub system_prompt: Option<String>,
     /// Maximum number of messages kept in history (oldest are dropped first).
@@ -27,8 +27,8 @@ impl Default for AppConfig {
     fn default() -> Self {
         Self {
             model: "qwen3.5:0.8b".to_string(),
-            host: "http://localhost".to_string(),
-            port: 11434,
+            host: "http://localhost:11434".to_string(),
+            api_key: None,
             system_prompt: None,
             max_history: None,
             max_tokens: None,

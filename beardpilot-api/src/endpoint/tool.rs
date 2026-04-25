@@ -1,5 +1,5 @@
-use std::future::Future;
 use schemars::{JsonSchema, Schema};
+use std::future::Future;
 
 pub trait Tool: Send {
     fn name(&self) -> &'static str;
@@ -12,7 +12,10 @@ pub trait ParamTypedTool: Tool {
     type Params: JsonSchema;
     type Error: std::error::Error + Send + Sync + 'static;
 
-    fn call(&mut self, parameters: Self::Params) -> impl Future<Output = Result<String, Self::Error>> + Send;
+    fn call(
+        &mut self,
+        parameters: Self::Params,
+    ) -> impl Future<Output = Result<String, Self::Error>> + Send;
 }
 
 pub fn tool_to_json(tool: &dyn Tool) -> serde_json::Value {

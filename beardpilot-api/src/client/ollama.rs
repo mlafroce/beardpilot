@@ -1,16 +1,18 @@
+#[cfg(feature = "stream")]
+use std::fmt::Debug;
 use std::marker::PhantomData;
 
 use futures_util::Stream;
 use url::Url;
 
 use crate::endpoint::{
-    EndpointError, EndpointStream, OllamaError,
     chat::{Chat, ChatResponse},
     embed::{Embed, EmbedResponse},
     generate::{Generate, GenerateResponse},
     model::ModelList,
     tag::TagList,
     version::Version,
+    EndpointError, EndpointStream, ProviderError,
 };
 
 #[derive(Debug)]
@@ -31,8 +33,9 @@ impl Default for Ollama {
 
 impl Ollama {
     pub fn new(host: &str, port: u16) -> Result<Self, EndpointError> {
+        let url_string = format!("http://{}:{}", host, port);
         Ok(Self {
-            url: Url::parse("http://127.0.0.1:11434")?,
+            url: Url::parse(&url_string)?,
             reqwest_client: reqwest::Client::new(),
         })
     }
@@ -47,7 +50,7 @@ impl Ollama {
             .send()
             .await?;
         let body = response.bytes().await?;
-        if let Ok(error_resp) = serde_json::from_slice::<OllamaError>(&body) {
+        if let Ok(error_resp) = serde_json::from_slice::<ProviderError>(&body) {
             return Err(EndpointError::OllamaError(error_resp.error));
         }
         let response = serde_json::from_slice::<Resp>(&body)?;
@@ -70,7 +73,7 @@ impl Ollama {
             .send()
             .await?;
         let body = response.bytes().await?;
-        if let Ok(error_resp) = serde_json::from_slice::<OllamaError>(&body) {
+        if let Ok(error_resp) = serde_json::from_slice::<ProviderError>(&body) {
             return Err(EndpointError::OllamaError(error_resp.error));
         }
         let response = serde_json::from_slice::<Resp>(&body)?;
@@ -85,7 +88,7 @@ impl Ollama {
     ) -> Result<impl Stream<Item = Result<Resp, EndpointError>>, EndpointError>
     where
         Req: serde::ser::Serialize,
-        Resp: serde::de::DeserializeOwned + Unpin,
+        Resp: serde::de::DeserializeOwned + Unpin + Debug,
     {
         let response = self
             .reqwest_client
@@ -98,6 +101,7 @@ impl Ollama {
         Ok(EndpointStream {
             stream,
             _data: PhantomData::<Resp>,
+            buffer: String::new(),
         })
     }
 

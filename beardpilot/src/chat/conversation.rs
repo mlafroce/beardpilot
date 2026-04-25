@@ -1,7 +1,8 @@
-use ollama_minapi::endpoint::{
+use beardpilot_api::endpoint::{
     chat::{Chat, ChatResponse, Message},
     tool::{tool_to_json, Tool},
 };
+use tracing::debug;
 
 use crate::tools::list_files::ListFiles;
 
@@ -109,13 +110,14 @@ impl Conversation {
 
     /// Add a response chunk
     pub fn push_chunk(&mut self, response: ChatResponse) {
-        if !response.message.thinking.is_empty() {
+        debug!("Chunk received: {:?}", response);
+        if !response.thinking().is_empty() {
             if self.response_status != ResponseStatus::Thinking {
                 let msg = ConversationMessage::thinking("");
                 self.messages.push(msg);
             }
             let message = self.messages.last_mut().unwrap();
-            message.text.push_str(&response.message.thinking);
+            message.text.push_str(&response.choices[0].delta.thinking);
             self.response_status = ResponseStatus::Thinking;
         } else {
             if self.response_status != ResponseStatus::ReceiveResponse {
@@ -123,7 +125,7 @@ impl Conversation {
                 self.messages.push(msg);
             }
             let message = self.messages.last_mut().unwrap();
-            message.text.push_str(&response.message.content);
+            message.text.push_str(&response.content());
             self.response_status = ResponseStatus::ReceiveResponse;
         }
         if let Some(data) = &response.final_data {
@@ -132,7 +134,7 @@ impl Conversation {
                 data.prompt_eval_count, data.eval_count
             )));
         }
-        if response.done {
+        if response.done().is_some() {
             self.response_status = ResponseStatus::Waiting;
         }
     }

@@ -1,26 +1,32 @@
 use crate::error::AppError;
 use crate::event::{AppEvent, SessionEvent};
+use beardpilot_api::client::Mistral;
+use beardpilot_api::endpoint::chat::{Chat, MessageRole};
 use futures_util::StreamExt;
-use ollama_minapi::endpoint::chat::Chat;
-use ollama_minapi::Ollama;
 use tokio::sync::mpsc::{self, unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tracing::debug;
 
 pub struct Session {
-    ollama: Ollama,
+    provider: Mistral,
     app_sender: mpsc::UnboundedSender<AppEvent>,
     sender: UnboundedSender<SessionEvent>,
     receiver: UnboundedReceiver<SessionEvent>,
+    /// Some models send the role once and only send it when it changes
+    last_role: MessageRole,
 }
 
 impl Session {
-    pub fn new(ollama: Ollama, app_sender: mpsc::UnboundedSender<AppEvent>) -> Result<Self, AppError> {
+    pub fn new(
+        provider: Mistral,
+        app_sender: mpsc::UnboundedSender<AppEvent>,
+    ) -> Result<Self, AppError> {
         let (sender, receiver) = unbounded_channel();
         Ok(Self {
-            ollama,
+            provider,
             app_sender,
             sender,
             receiver,
+            last_role: MessageRole::Assistant,
         })
     }
 
@@ -34,7 +40,6 @@ impl Session {
                 SessionEvent::SendChat(messages) => {
                     debug!("SessionEvent::SubmitPrompt");
                     let resp = self.send_chat(messages).await;
-                    let _ = self.app_sender.send(AppEvent::SubmitResponse(resp));
                 }
                 SessionEvent::ConfirmationRequest { prompt, response } => {
                     debug!("Confirmation request: {}", prompt);
@@ -44,18 +49,15 @@ impl Session {
         }
     }
 
-    pub async fn send_chat(
-        &mut self,
-        chat: Chat,
-    ) -> Result<String, AppError> {
-        debug!("SessionEvent::submit, calling ollama");
-        let mut response = self.ollama.post_chat_stream(chat).await?;
-        let mut final_response = String::new();
+    pub async fn send_chat(&mut self, chat: Chat) -> Result<(), AppError> {
+        let mut response = self.provider.post_chat_stream(chat).await?;
         while let Some(chunk) = response.next().await {
             let chunk = chunk?;
-            let _ = self.app_sender.send(AppEvent::ResponseChunk(chunk.clone()));
-            final_response.push_str(&chunk.message.content);
+            if let Some(new_role) = &chunk.role() {
+                self.last_role = new_role.clone();
+            }
+            let _ = self.app_sender.send(AppEvent::ResponseChunk(chunk));
         }
-        Ok(final_response)
+        Ok(())
     }
 }

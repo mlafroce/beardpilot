@@ -1,4 +1,2 @@
+pub mod client;
 pub mod endpoint;
-pub mod ollama;
-
-pub use ollama::Ollama;

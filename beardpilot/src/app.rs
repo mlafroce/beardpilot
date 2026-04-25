@@ -1,11 +1,11 @@
+use beardpilot_api::client::mistral::Mistral;
 use crossterm::event::EventStream;
 use futures_util::StreamExt;
-use ollama_minapi::Ollama;
-use tokio::sync::mpsc::{self, UnboundedSender, unbounded_channel};
+use tokio::sync::mpsc::{self, unbounded_channel, UnboundedSender};
 use tokio::task::JoinSet;
 use tracing::debug;
 
-use crate::chat::conversation::{self, Conversation, ModelInfo};
+use crate::chat::conversation::{Conversation, ModelInfo};
 use crate::chat::session::Session;
 use crate::config::AppConfig;
 use crate::error::AppError;
@@ -26,7 +26,10 @@ pub struct App {
 impl App {
     pub fn new(config: AppConfig) -> Result<Self, AppError> {
         let tui = Tui::new().map_err(AppError::Io)?;
-        let model_info = ModelInfo { model_name: config.model.clone(), max_tokens: None };
+        let model_info = ModelInfo {
+            model_name: config.model.clone(),
+            max_tokens: None,
+        };
         let conversation = Conversation::new(config.system_prompt.clone(), model_info);
         let state = AppState { conversation };
         Ok(Self { config, tui, state })
@@ -35,21 +38,15 @@ impl App {
     /// Run the interactive chat loop until the user exits.
     pub async fn run(&mut self) -> Result<(), AppError> {
         // Initial render
-        let ollama = Ollama::new(&self.config.host, self.config.port)?;
-        //let models = ollama.list_local_models().await?;
-        //debug!("Local models:");
-        //debug!("{:?}", models);
+        let mistral = Mistral::new(&self.config.host, self.config.api_key.as_ref().unwrap())?;
         let (sender, mut receiver) = unbounded_channel();
         let mut tasks = tokio::task::JoinSet::new();
-        let session_sender = App::spawn_session_actor(&mut tasks, ollama, sender.clone());
+        let session_sender = App::spawn_session_actor(&mut tasks, mistral, sender.clone());
 
         tokio::spawn(async move {
             let mut events = EventStream::new();
             while let Some(event) = events.next().await {
-                if sender
-                    .send(AppEvent::UiEvent(event.unwrap()))
-                    .is_err()
-                {
+                if sender.send(AppEvent::UiEvent(event.unwrap())).is_err() {
                     break;
                 }
             }
@@ -66,21 +63,16 @@ impl App {
                         UiAction::Submit(text) => {
                             self.state.conversation.push_user(text);
                             let _ = session_sender.send(SessionEvent::SendChat(
-                                self.state.conversation.session_chat()
+                                self.state.conversation.session_chat(),
                             ));
                         }
                         _ => {}
                     }
                     self.redraw()?;
                 }
-                Some(AppEvent::SubmitResponse(response)) => {
-                    debug!("Response arrived: {:?}", response);
-                    if let Err(e) = response {
-                        debug!("Submit error: {:?}", e);
-                    }
-                }
-                Some(AppEvent::ResponseChunk(response)) => {
-                    self.state.conversation.push_chunk(response);
+                Some(AppEvent::ResponseChunk(chunk)) => {
+                    debug!("Received chunk: {:?}", chunk);
+                    self.state.conversation.push_chunk(chunk);
                     self.tui.scroll_to_bottom();
                     self.redraw()?;
                 }
@@ -92,7 +84,7 @@ impl App {
 
     fn spawn_session_actor(
         tasks: &mut JoinSet<()>,
-        ollama: Ollama,
+        ollama: Mistral,
         app_sender: mpsc::UnboundedSender<AppEvent>,
     ) -> UnboundedSender<SessionEvent> {
         let actor = Session::new(ollama, app_sender).unwrap();
