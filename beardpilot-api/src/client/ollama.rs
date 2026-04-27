@@ -12,8 +12,9 @@ use crate::endpoint::{
     model::ModelList,
     tag::TagList,
     version::Version,
-    EndpointError, EndpointStream, ProviderError,
+    EndpointStream,
 };
+use crate::error::{EndpointError, ProviderError};
 
 #[derive(Debug)]
 pub struct Ollama {
@@ -51,7 +52,7 @@ impl Ollama {
             .await?;
         let body = response.bytes().await?;
         if let Ok(error_resp) = serde_json::from_slice::<ProviderError>(&body) {
-            return Err(EndpointError::OllamaError(error_resp.error));
+            return Err(EndpointError::ClientError(error_resp.error));
         }
         let response = serde_json::from_slice::<Resp>(&body)?;
         Ok(response)
@@ -74,7 +75,7 @@ impl Ollama {
             .await?;
         let body = response.bytes().await?;
         if let Ok(error_resp) = serde_json::from_slice::<ProviderError>(&body) {
-            return Err(EndpointError::OllamaError(error_resp.error));
+            return Err(EndpointError::ClientError(error_resp.error));
         }
         let response = serde_json::from_slice::<Resp>(&body)?;
         Ok(response)

@@ -1,13 +1,13 @@
 use crate::error::AppError;
 use crate::event::{AppEvent, SessionEvent};
-use beardpilot_api::client::Mistral;
+use beardpilot_api::client::MistralClient;
 use beardpilot_api::endpoint::chat::{Chat, MessageRole};
 use futures_util::StreamExt;
 use tokio::sync::mpsc::{self, unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tracing::debug;
 
 pub struct Session {
-    provider: Mistral,
+    provider: MistralClient,
     app_sender: mpsc::UnboundedSender<AppEvent>,
     sender: UnboundedSender<SessionEvent>,
     receiver: UnboundedReceiver<SessionEvent>,
@@ -17,7 +17,7 @@ pub struct Session {
 
 impl Session {
     pub fn new(
-        provider: Mistral,
+        provider: MistralClient,
         app_sender: mpsc::UnboundedSender<AppEvent>,
     ) -> Result<Self, AppError> {
         let (sender, receiver) = unbounded_channel();
@@ -50,7 +50,7 @@ impl Session {
     }
 
     pub async fn send_chat(&mut self, chat: Chat) -> Result<(), AppError> {
-        let mut response = self.provider.post_chat_stream(chat).await?;
+        let mut response = self.provider.chat_stream(chat).await?;
         while let Some(chunk) = response.next().await {
             let chunk = chunk?;
             if let Some(new_role) = &chunk.role() {

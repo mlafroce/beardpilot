@@ -1,4 +1,4 @@
-use beardpilot_api::client::mistral::Mistral;
+use beardpilot_api::client::mistral::MistralClient;
 use crossterm::event::EventStream;
 use futures_util::StreamExt;
 use tokio::sync::mpsc::{self, unbounded_channel, UnboundedSender};
@@ -38,7 +38,7 @@ impl App {
     /// Run the interactive chat loop until the user exits.
     pub async fn run(&mut self) -> Result<(), AppError> {
         // Initial render
-        let mistral = Mistral::new(&self.config.host, self.config.api_key.as_ref().unwrap())?;
+        let mistral = MistralClient::new(&self.config.host, self.config.api_key.as_ref().unwrap())?;
         let (sender, mut receiver) = unbounded_channel();
         let mut tasks = tokio::task::JoinSet::new();
         let session_sender = App::spawn_session_actor(&mut tasks, mistral, sender.clone());
@@ -84,10 +84,10 @@ impl App {
 
     fn spawn_session_actor(
         tasks: &mut JoinSet<()>,
-        ollama: Mistral,
+        client: MistralClient,
         app_sender: mpsc::UnboundedSender<AppEvent>,
     ) -> UnboundedSender<SessionEvent> {
-        let actor = Session::new(ollama, app_sender).unwrap();
+        let actor = Session::new(client, app_sender).unwrap();
         let sender = actor.get_sender();
         tasks.spawn(actor.run());
         sender

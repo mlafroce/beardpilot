@@ -1,8 +1,6 @@
 #[cfg(feature = "stream")]
-use std::fmt::Debug;
-use std::marker::PhantomData;
-
 use futures_util::Stream;
+use std::fmt::Debug;
 use url::Url;
 
 use crate::endpoint::{
@@ -12,17 +10,17 @@ use crate::endpoint::{
     model::ModelList,
     tag::TagList,
     version::Version,
-    EndpointError, EndpointStream, ProviderError,
 };
+use crate::error::{EndpointError, ProviderError};
 
 #[derive(Debug)]
-pub struct Mistral {
+pub struct MistralClient {
     pub(crate) url: Url,
     pub(crate) reqwest_client: reqwest::Client,
     pub(crate) api_key: String,
 }
 
-impl Mistral {
+impl MistralClient {
     pub fn new(host: &str, api_key: &str) -> Result<Self, EndpointError> {
         Ok(Self {
             url: Url::parse(&host)?,
@@ -43,7 +41,7 @@ impl Mistral {
             .await?;
         let body = response.bytes().await?;
         if let Ok(error_resp) = serde_json::from_slice::<ProviderError>(&body) {
-            return Err(EndpointError::OllamaError(error_resp.error));
+            return Err(EndpointError::ClientError(error_resp.error));
         }
         let response = serde_json::from_slice::<Resp>(&body)?;
         Ok(response)
@@ -67,7 +65,7 @@ impl Mistral {
             .await?;
         let body = response.bytes().await?;
         if let Ok(error_resp) = serde_json::from_slice::<ProviderError>(&body) {
-            return Err(EndpointError::OllamaError(error_resp.error));
+            return Err(EndpointError::ClientError(error_resp.error));
         }
         let response = serde_json::from_slice::<Resp>(&body)?;
         Ok(response)
@@ -83,6 +81,10 @@ impl Mistral {
         Req: serde::ser::Serialize,
         Resp: serde::de::DeserializeOwned + Unpin + Debug,
     {
+        use std::marker::PhantomData;
+
+        use crate::endpoint::EndpointStream;
+
         let response = self
             .reqwest_client
             .post(self.url.join(endpoint).unwrap())
@@ -115,19 +117,19 @@ impl Mistral {
     }
 
     /// Creates vector embeddings representing the input text
-    pub async fn post_embed(&self, embed: Embed) -> Result<EmbedResponse, EndpointError> {
+    pub async fn embed(&self, embed: Embed) -> Result<EmbedResponse, EndpointError> {
         self.post_endpoint("/api/embed", embed).await
     }
 
     /// Generate the next chat message in a conversation between a user and an assistant.
-    pub async fn post_chat(&self, mut chat: Chat) -> Result<ChatResponse, EndpointError> {
+    pub async fn chat(&self, mut chat: Chat) -> Result<ChatResponse, EndpointError> {
         chat.stream = false;
         self.post_endpoint("/v1/chat/completions", chat).await
     }
 
     /// Generate the next chat message in a conversation between a user and an assistant, in a stream.
     #[cfg(feature = "stream")]
-    pub async fn post_chat_stream(
+    pub async fn chat_stream(
         &self,
         mut chat: Chat,
     ) -> Result<impl Stream<Item = Result<ChatResponse, EndpointError>>, EndpointError> {
@@ -137,7 +139,7 @@ impl Mistral {
     }
 
     /// Generates a response for the provided prompt, in a stream
-    pub async fn post_generate(
+    pub async fn generate(
         &self,
         mut generate: Generate,
     ) -> Result<GenerateResponse, EndpointError> {
@@ -147,7 +149,7 @@ impl Mistral {
 
     /// Generates a response for the provided prompt, in a stream
     #[cfg(feature = "stream")]
-    pub async fn post_generate_stream(
+    pub async fn generate_stream(
         &self,
         mut generate: Generate,
     ) -> Result<impl Stream<Item = Result<GenerateResponse, EndpointError>>, EndpointError> {

@@ -168,11 +168,11 @@ impl Conversation {
     fn session_messages(&self) -> Vec<Message> {
         let mut all: Vec<Message> = Vec::with_capacity(self.messages.len() + 1);
         if let Some(ref prompt) = self.system_prompt {
-            all.push(Message::system(prompt.clone()));
+            all.push(Message::system(&prompt));
         }
         all.extend(self.messages.iter().filter_map(|m| match m.role {
-            Role::User => Some(Message::user(m.text.clone())),
-            Role::Assistant => Some(Message::assistant(m.text.clone())),
+            Role::User => Some(Message::user(&m.text)),
+            Role::Assistant => Some(Message::assistant(&m.text)),
             _ => None,
         }));
         all

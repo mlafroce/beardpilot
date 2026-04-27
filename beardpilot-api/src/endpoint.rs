@@ -5,6 +5,8 @@ use std::marker::PhantomData;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
+use crate::error::EndpointError;
+
 pub mod chat;
 pub mod embed;
 pub mod generate;
@@ -12,23 +14,6 @@ pub mod model;
 pub mod tag;
 pub mod tool;
 pub mod version;
-
-#[derive(Debug, thiserror::Error)]
-pub enum EndpointError {
-    #[error("Network error: {0}")]
-    NetworkError(#[from] reqwest::Error),
-    #[error("Failed to deserialize version response: {0}")]
-    DeserializationError(#[from] serde_json::Error),
-    #[error("Ollama error: {0}")]
-    OllamaError(String),
-    #[error("Parser error {0}")]
-    ParserError(#[from] url::ParseError),
-}
-
-#[derive(Debug, serde::Deserialize)]
-pub struct ProviderError {
-    pub error: String,
-}
 
 /// A wrapper stream that deserializes JSON responses and handles errors
 pub struct EndpointStream<S, ResponseItem> {
@@ -81,7 +66,7 @@ where
     fn handle_stream_bytes(&mut self, bytes: B) -> Option<Result<ResponseItem, EndpointError>> {
         let s = match str::from_utf8(bytes.as_ref()) {
             Ok(s) => s,
-            Err(e) => return Some(Err(EndpointError::OllamaError(e.to_string()))),
+            Err(e) => return Some(Err(EndpointError::ClientError(e.to_string()))),
         };
         debug!("Pushing to buffer: {:?}", s);
         // Add to buffer

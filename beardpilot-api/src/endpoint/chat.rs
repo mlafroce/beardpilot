@@ -90,6 +90,104 @@ impl CallOptions {
     }
 }
 
+/// Builder for creating Chat instances with a fluent interface
+pub struct ChatBuilder {
+    model: String,
+    messages: Vec<Message>,
+    tools: Vec<serde_json::Value>,
+    format: String,
+    options: CallOptions,
+    stream: bool,
+    think: Option<bool>,
+    keep_alive: Option<String>,
+    logprobs: Option<bool>,
+    top_logprobs: Option<i64>,
+}
+
+impl Chat {
+    /// Create a new ChatBuilder with the required fields
+    pub fn new(model: impl Into<String>, messages: Vec<Message>) -> ChatBuilder {
+        ChatBuilder {
+            model: model.into(),
+            messages,
+            tools: vec![],
+            format: String::new(),
+            options: CallOptions::default(),
+            stream: false,
+            think: None,
+            keep_alive: None,
+            logprobs: None,
+            top_logprobs: None,
+        }
+    }
+}
+
+impl ChatBuilder {
+    /// Set the tools for the chat
+    pub fn with_tools(mut self, tools: Vec<serde_json::Value>) -> Self {
+        self.tools = tools;
+        self
+    }
+
+    /// Set the format for the chat response
+    pub fn with_format(mut self, format: impl Into<String>) -> Self {
+        self.format = format.into();
+        self
+    }
+
+    /// Set the call options for the chat
+    pub fn with_options(mut self, options: CallOptions) -> Self {
+        self.options = options;
+        self
+    }
+
+    /// Set whether to stream the response
+    pub fn with_stream(mut self, stream: bool) -> Self {
+        self.stream = stream;
+        self
+    }
+
+    /// Set the think option
+    pub fn with_think(mut self, think: bool) -> Self {
+        self.think = Some(think);
+        self
+    }
+
+    /// Set the keep_alive duration
+    pub fn with_keep_alive(mut self, keep_alive: impl Into<String>) -> Self {
+        self.keep_alive = Some(keep_alive.into());
+        self
+    }
+
+    /// Set whether to return log probabilities
+    pub fn with_logprobs(mut self, logprobs: bool) -> Self {
+        self.logprobs = Some(logprobs);
+        self
+    }
+
+    /// Set the number of top log probabilities to return
+    pub fn with_top_logprobs(mut self, top_logprobs: i64) -> Self {
+        self.top_logprobs = Some(top_logprobs);
+        self
+    }
+
+    /// Build the Chat instance
+    pub fn build(self) -> Chat {
+        Chat {
+            model: self.model,
+            messages: self.messages,
+            tools: self.tools,
+            format: self.format,
+            options: self.options,
+            stream: self.stream,
+            think: self.think,
+            keep_alive: self.keep_alive,
+            logprobs: self.logprobs,
+            top_logprobs: self.top_logprobs,
+        }
+    }
+}
+
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MessageRole {
@@ -128,28 +226,28 @@ pub struct Message {
 }
 
 impl Message {
-    pub fn system(content: String) -> Self {
+    pub fn system(content: &str) -> Self {
         Self {
             role: Some(MessageRole::System),
-            content,
+            content: content.to_owned(),
             images: vec![],
             tool_calls: vec![],
         }
     }
 
-    pub fn user(content: String) -> Self {
+    pub fn user(content: &str) -> Self {
         Self {
             role: Some(MessageRole::User),
-            content,
+            content: content.to_owned(),
             images: vec![],
             tool_calls: vec![],
         }
     }
 
-    pub fn assistant(content: String) -> Self {
+    pub fn assistant(content: &str) -> Self {
         Self {
             role: Some(MessageRole::Assistant),
-            content,
+            content: content.to_owned(),
             images: vec![],
             tool_calls: vec![],
         }
