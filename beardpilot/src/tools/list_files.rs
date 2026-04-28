@@ -1,4 +1,4 @@
-use beardpilot_api::endpoint::tool::{ParamTypedTool, Tool};
+use beardpilot_api::endpoint::tool::Tool;
 use schemars::JsonSchema;
 use serde::Deserialize;
 
@@ -20,6 +20,9 @@ pub enum ListFilesError {
 }
 
 impl Tool for ListFiles {
+    type Params = ListFilesParams;
+    type Error = ListFilesError;
+
     fn name(&self) -> &'static str {
         "ListFiles"
     }
@@ -27,15 +30,6 @@ impl Tool for ListFiles {
     fn description(&self) -> &'static str {
         "Lists files in a folder"
     }
-
-    fn params_schema(&self) -> schemars::Schema {
-        schemars::schema_for!(ListFilesParams)
-    }
-}
-
-impl ParamTypedTool for ListFiles {
-    type Params = ListFilesParams;
-    type Error = ListFilesError;
 
     async fn call(&mut self, parameters: Self::Params) -> Result<String, Self::Error> {
         let path = parameters.path.as_deref().unwrap_or(".");
@@ -56,7 +50,7 @@ impl ParamTypedTool for ListFiles {
             Ok(String::from_utf8_lossy(&output.stdout).into_owned())
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-            Ok(format!("ls failed: {}", stderr).into())
+            Ok(format!("ls failed: {}", stderr))
         }
     }
 }

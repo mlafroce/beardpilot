@@ -16,7 +16,6 @@ use ratatui::{
     Frame, Terminal,
 };
 use std::io::{self, Stdout};
-use tracing::debug;
 
 use crate::{
     app::AppState,

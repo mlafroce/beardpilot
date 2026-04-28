@@ -4,7 +4,7 @@ use std::fmt::Debug;
 use url::Url;
 
 use crate::endpoint::{
-    chat::{Chat, ChatResponse},
+    chat::{Chat, ChatSimpleResponse, ChatStreamResponse},
     embed::{Embed, EmbedResponse},
     generate::{Generate, GenerateResponse},
     model::ModelList,
@@ -23,7 +23,7 @@ pub struct MistralClient {
 impl MistralClient {
     pub fn new(host: &str, api_key: &str) -> Result<Self, EndpointError> {
         Ok(Self {
-            url: Url::parse(&host)?,
+            url: Url::parse(host)?,
             reqwest_client: reqwest::Client::new(),
             api_key: api_key.to_string(),
         })
@@ -122,7 +122,7 @@ impl MistralClient {
     }
 
     /// Generate the next chat message in a conversation between a user and an assistant.
-    pub async fn chat(&self, mut chat: Chat) -> Result<ChatResponse, EndpointError> {
+    pub async fn chat(&self, mut chat: Chat) -> Result<ChatSimpleResponse, EndpointError> {
         chat.stream = false;
         self.post_endpoint("/v1/chat/completions", chat).await
     }
@@ -132,7 +132,7 @@ impl MistralClient {
     pub async fn chat_stream(
         &self,
         mut chat: Chat,
-    ) -> Result<impl Stream<Item = Result<ChatResponse, EndpointError>>, EndpointError> {
+    ) -> Result<impl Stream<Item = Result<ChatStreamResponse, EndpointError>>, EndpointError> {
         chat.stream = true;
         self.post_endpoint_stream("/v1/chat/completions", chat)
             .await

@@ -84,8 +84,8 @@ where
         } else {
             self.buffer.drain(..).collect()
         };
-        let trimmed = if json_chunk.starts_with("data: ") {
-            json_chunk["data: ".len()..].trim().to_string()
+        let trimmed = if let Some(stripped) = json_chunk.strip_prefix("data: ") {
+            stripped.trim().to_string()
         } else {
             json_chunk.trim().to_string()
         };

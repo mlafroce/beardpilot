@@ -39,7 +39,7 @@ impl Session {
             match message {
                 SessionEvent::SendChat(messages) => {
                     debug!("SessionEvent::SubmitPrompt");
-                    let resp = self.send_chat(messages).await;
+                    let _ = self.send_chat(messages).await;
                 }
                 SessionEvent::ConfirmationRequest { prompt, response } => {
                     debug!("Confirmation request: {}", prompt);

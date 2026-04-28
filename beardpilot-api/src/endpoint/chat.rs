@@ -2,6 +2,8 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 
+use crate::endpoint::tool::{tool_to_json, ErasedTool};
+
 /// Generate the next chat message in a conversation between a user and an assistant.
 #[derive(Debug, Default, Clone, serde::Serialize)]
 pub struct Chat {
@@ -124,8 +126,8 @@ impl Chat {
 
 impl ChatBuilder {
     /// Set the tools for the chat
-    pub fn with_tools(mut self, tools: Vec<serde_json::Value>) -> Self {
-        self.tools = tools;
+    pub fn with_tools(mut self, tools: Vec<Box<dyn ErasedTool>>) -> Self {
+        self.tools = tools.iter().map(Box::as_ref).map(tool_to_json).collect();
         self
     }
 
@@ -215,14 +217,17 @@ pub struct Message {
     #[serde(default)]
     pub content: String,
 
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub thinking: String,
+
     /// List of inline images for multimodal models
     /// Base64-encoded image content
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub images: Vec<String>,
 
     /// Tool call requests produced by the model
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub tool_calls: Vec<ToolCall>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<ToolCall>>,
 }
 
 impl Message {
@@ -231,7 +236,8 @@ impl Message {
             role: Some(MessageRole::System),
             content: content.to_owned(),
             images: vec![],
-            tool_calls: vec![],
+            tool_calls: None,
+            thinking: String::new(),
         }
     }
 
@@ -240,7 +246,8 @@ impl Message {
             role: Some(MessageRole::User),
             content: content.to_owned(),
             images: vec![],
-            tool_calls: vec![],
+            tool_calls: None,
+            thinking: String::new(),
         }
     }
 
@@ -249,13 +256,14 @@ impl Message {
             role: Some(MessageRole::Assistant),
             content: content.to_owned(),
             images: vec![],
-            tool_calls: vec![],
+            tool_calls: None,
+            thinking: String::new(),
         }
     }
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
-pub struct ResponseMessage {
+pub struct StreamMessage {
     /// Optional deliberate thinking trace when `think` is enabled
     #[serde(default)]
     pub thinking: String,
@@ -270,15 +278,30 @@ pub struct ToolCall {
     function: ToolCallFunction,
 }
 
+fn deserialize_arguments<'de, D>(deserializer: D) -> Result<HashMap<String, Value>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::{Deserialize, Error};
+
+    let s = String::deserialize(deserializer)?;
+    serde_json::from_str(&s).map_err(D::Error::custom)
+}
+
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct ToolCallFunction {
+    #[serde(default)]
     index: Value,
     name: String,
+    #[serde(deserialize_with = "deserialize_arguments")]
     arguments: HashMap<String, Value>,
 }
 
+pub type ChatSimpleResponse = ChatBaseResponse<Choice>;
+pub type ChatStreamResponse = ChatBaseResponse<StreamChoice>;
+
 #[derive(Debug, Clone, serde::Deserialize)]
-pub struct ChatResponse {
+pub struct ChatBaseResponse<T> {
     /// Unique identifier for the response
     #[serde(default)]
     pub id: String,
@@ -295,7 +318,7 @@ pub struct ChatResponse {
 
     ///The model's generated text response
     //pub message: Message,
-    pub choices: Vec<MessageChunk>,
+    pub choices: Vec<T>,
 
     ///Indicates whether generation has finished
     #[serde(default)]
@@ -310,9 +333,18 @@ pub struct ChatResponse {
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
-pub struct MessageChunk {
+pub struct Choice {
     pub index: i64,
-    pub delta: ResponseMessage,
+    pub message: Message,
+    ///Indicates whether generation has finished
+    #[serde(default)]
+    pub finish_reason: Option<FinishReason>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct StreamChoice {
+    pub index: i64,
+    pub delta: StreamMessage,
     ///Indicates whether generation has finished
     #[serde(default)]
     pub finish_reason: Option<FinishReason>,
@@ -339,7 +371,29 @@ pub struct ChatMessageFinalResponseData {
     pub eval_duration: i64,
 }
 
-impl ChatResponse {
+impl ChatBaseResponse<Choice> {
+    pub fn thinking(&self) -> &str {
+        &self.choices[0].message.thinking
+    }
+
+    pub fn content(&self) -> &str {
+        &self.choices[0].message.content
+    }
+
+    pub fn role(&self) -> &Option<MessageRole> {
+        &self.choices[0].message.role
+    }
+
+    pub fn done(&self) -> Option<FinishReason> {
+        if self.done {
+            Some(FinishReason::Stop)
+        } else {
+            self.choices[0].finish_reason.clone()
+        }
+    }
+}
+
+impl ChatBaseResponse<StreamChoice> {
     pub fn thinking(&self) -> &str {
         &self.choices[0].delta.thinking
     }

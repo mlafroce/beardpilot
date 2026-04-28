@@ -6,7 +6,7 @@ use futures_util::Stream;
 use url::Url;
 
 use crate::endpoint::{
-    chat::{Chat, ChatResponse},
+    chat::{Chat, ChatStreamResponse},
     embed::{Embed, EmbedResponse},
     generate::{Generate, GenerateResponse},
     model::ModelList,
@@ -127,7 +127,7 @@ impl Ollama {
     }
 
     /// Generate the next chat message in a conversation between a user and an assistant.
-    pub async fn post_chat(&self, mut chat: Chat) -> Result<ChatResponse, EndpointError> {
+    pub async fn post_chat(&self, mut chat: Chat) -> Result<ChatStreamResponse, EndpointError> {
         chat.stream = false;
         self.post_endpoint("/api/chat", chat).await
     }
@@ -137,7 +137,7 @@ impl Ollama {
     pub async fn post_chat_stream(
         &self,
         mut chat: Chat,
-    ) -> Result<impl Stream<Item = Result<ChatResponse, EndpointError>>, EndpointError> {
+    ) -> Result<impl Stream<Item = Result<ChatStreamResponse, EndpointError>>, EndpointError> {
         chat.stream = true;
         self.post_endpoint_stream("/api/chat", chat).await
     }

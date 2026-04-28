@@ -1,6 +1,6 @@
 use beardpilot_api::endpoint::{
-    chat::{Chat, ChatResponse, Message},
-    tool::{tool_to_json, Tool},
+    chat::{Chat, ChatStreamResponse, Message},
+    tool::{tool_to_json, ErasedTool},
 };
 use tracing::debug;
 
@@ -83,7 +83,7 @@ pub struct Conversation {
     messages: Vec<ConversationMessage>,
     system_prompt: Option<String>,
     pub model_info: ModelInfo,
-    tools: Vec<Box<dyn Tool>>,
+    tools: Vec<Box<dyn ErasedTool>>,
     response_status: ResponseStatus,
 }
 
@@ -109,7 +109,7 @@ impl Conversation {
     }
 
     /// Add a response chunk
-    pub fn push_chunk(&mut self, response: ChatResponse) {
+    pub fn push_chunk(&mut self, response: ChatStreamResponse) {
         debug!("Chunk received: {:?}", response);
         if !response.thinking().is_empty() {
             if self.response_status != ResponseStatus::Thinking {

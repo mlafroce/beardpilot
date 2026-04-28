@@ -1,10 +1,10 @@
-use beardpilot_api::endpoint::chat::{Chat, ChatResponse};
+use beardpilot_api::endpoint::chat::{Chat, ChatStreamResponse};
 use crossterm::event::Event;
 use tokio::sync::oneshot;
 
 pub enum AppEvent {
     UiEvent(Event),
-    ResponseChunk(ChatResponse),
+    ResponseChunk(ChatStreamResponse),
 }
 
 pub enum SessionEvent {
