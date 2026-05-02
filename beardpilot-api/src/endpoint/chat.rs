@@ -1,7 +1,3 @@
-use std::collections::HashMap;
-
-use serde_json::Value;
-
 use crate::endpoint::tool::{tool_to_json, ErasedTool};
 
 /// Generate the next chat message in a conversation between a user and an assistant.
@@ -108,7 +104,7 @@ pub struct ChatBuilder {
 
 impl Chat {
     /// Create a new ChatBuilder with the required fields
-    pub fn new(model: impl Into<String>, messages: Vec<Message>) -> ChatBuilder {
+    pub fn builder(model: impl Into<String>, messages: Vec<Message>) -> ChatBuilder {
         ChatBuilder {
             model: model.into(),
             messages,
@@ -226,8 +222,13 @@ pub struct Message {
     pub images: Vec<String>,
 
     /// Tool call requests produced by the model
+    /// assistant role attribute
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool_calls: Option<Vec<ToolCall>>,
+    pub tool_calls: Option<Vec<ToolCallMessage>>,
+
+    /// Tool responses, tool role attribute
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
 }
 
 impl Message {
@@ -238,6 +239,7 @@ impl Message {
             images: vec![],
             tool_calls: None,
             thinking: String::new(),
+            tool_call_id: None,
         }
     }
 
@@ -248,6 +250,7 @@ impl Message {
             images: vec![],
             tool_calls: None,
             thinking: String::new(),
+            tool_call_id: None,
         }
     }
 
@@ -258,6 +261,29 @@ impl Message {
             images: vec![],
             tool_calls: None,
             thinking: String::new(),
+            tool_call_id: None,
+        }
+    }
+
+    pub fn tool_calls(tool_calls: Vec<ToolCallMessage>) -> Self {
+        Self {
+            role: Some(MessageRole::Assistant),
+            content: String::new(),
+            images: vec![],
+            tool_calls: Some(tool_calls),
+            thinking: String::new(),
+            tool_call_id: None,
+        }
+    }
+
+    pub fn tool_response(id: String, response: String) -> Self {
+        Self {
+            role: Some(MessageRole::Tool),
+            content: response,
+            images: vec![],
+            tool_calls: None,
+            thinking: String::new(),
+            tool_call_id: Some(id),
         }
     }
 }
@@ -273,28 +299,18 @@ pub struct StreamMessage {
 }
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
-pub struct ToolCall {
-    id: String,
-    function: ToolCallFunction,
-}
-
-fn deserialize_arguments<'de, D>(deserializer: D) -> Result<HashMap<String, Value>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    use serde::de::{Deserialize, Error};
-
-    let s = String::deserialize(deserializer)?;
-    serde_json::from_str(&s).map_err(D::Error::custom)
+pub struct ToolCallMessage {
+    pub id: String,
+    pub function: ToolCallFunction,
+    pub index: i64,
 }
 
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct ToolCallFunction {
-    #[serde(default)]
-    index: Value,
-    name: String,
-    #[serde(deserialize_with = "deserialize_arguments")]
-    arguments: HashMap<String, Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub index: Option<u32>,
+    pub name: String,
+    pub arguments: String,
 }
 
 pub type ChatSimpleResponse = ChatBaseResponse<Choice>;
@@ -412,5 +428,9 @@ impl ChatBaseResponse<StreamChoice> {
         } else {
             self.choices[0].finish_reason.clone()
         }
+    }
+
+    pub fn tool_calls(&self) -> Option<Vec<ToolCallMessage>> {
+        self.choices[0].delta.message.tool_calls.clone()
     }
 }

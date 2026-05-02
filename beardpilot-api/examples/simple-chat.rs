@@ -13,7 +13,7 @@ async fn main() -> Result<(), EndpointError> {
         Message::system("You are a helpful assistant"),
         Message::user("Explain what a coding agent is"),
     ];
-    let chat = Chat::new("mistral-small-latest", messages).build();
+    let chat = Chat::builder("mistral-small-latest", messages).build();
     let response = client.chat(chat).await?;
 
     println!("{}", response.content());

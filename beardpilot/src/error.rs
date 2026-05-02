@@ -11,4 +11,9 @@ pub enum AppError {
 
     #[error("Client error: {0}")]
     Client(#[from] EndpointError),
+
+    #[error("ToolError error: {0}")]
+    ToolError(String),
 }
+
+pub type AppResult<T> = Result<T, AppError>;

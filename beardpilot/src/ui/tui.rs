@@ -19,7 +19,7 @@ use std::io::{self, Stdout};
 
 use crate::{
     app::AppState,
-    chat::conversation::{Conversation, ModelInfo, ResponseStatus, Role},
+    chat::conversation::{Conversation, LocalMessage, ModelInfo, ResponseStatus},
     event::UiAction,
     ui::input::TextInput,
 };
@@ -96,7 +96,7 @@ impl Tui {
                 .scroll((self.scroll, 0));
             frame.render_widget(msgs_paragraph, msgs_area);
 
-            let res_status = state.conversation.response_status();
+            let res_status = state.conversation.conversation_status();
             render_input(frame, input_area, &self.input, res_status, &status_label);
         })?;
 
@@ -194,28 +194,23 @@ impl Tui {
 
         match mouse.kind {
             // Click inside the input box → reposition cursor
-            MouseEventKind::Down(MouseButton::Left) => {
+            MouseEventKind::Down(MouseButton::Left)
                 if mouse.row >= input_area.top()
                     && mouse.row < input_area.bottom()
                     && mouse.column >= input_area.left()
-                    && mouse.column < input_area.right()
-                {
-                    // column relative to the inner widget (subtract left border)
-                    let col = mouse.column.saturating_sub(input_area.x + 1);
-                    self.input.set_cursor_from_click(col);
-                }
+                    && mouse.column < input_area.right() =>
+            {
+                // column relative to the inner widget (subtract left border)
+                let col = mouse.column.saturating_sub(input_area.x + 1);
+                self.input.set_cursor_from_click(col);
             }
 
             // Scroll wheel in the messages pane
-            MouseEventKind::ScrollUp => {
-                if mouse.row < msgs_area.bottom() {
-                    self.scroll_up(3);
-                }
+            MouseEventKind::ScrollUp if mouse.row < msgs_area.bottom() => {
+                self.scroll_up(3);
             }
-            MouseEventKind::ScrollDown => {
-                if mouse.row < msgs_area.bottom() {
-                    self.scroll_down(3);
-                }
+            MouseEventKind::ScrollDown if mouse.row < msgs_area.bottom() => {
+                self.scroll_down(3);
             }
 
             _ => {}
@@ -297,66 +292,89 @@ fn build_message_lines(conversation: &Conversation, max_width: u16) -> Vec<Line<
     let mut lines: Vec<Line<'static>> = Vec::new();
 
     for msg in conversation.messages() {
-        let (prefix, prefix_style, text_style) = match msg.role {
-            Role::User => (
-                "You  │ ",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-                Style::default().fg(Color::White),
-            ),
-            Role::Assistant => (
-                "AI   │ ",
-                Style::default()
-                    .fg(Color::Green)
-                    .add_modifier(Modifier::BOLD),
-                Style::default().fg(Color::White),
-            ),
-            Role::Info => (
-                "Info │ ",
-                Style::default().fg(Color::Yellow),
-                Style::default().fg(Color::DarkGray),
-            ),
-            Role::Error => (
-                "Err  │ ",
-                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-                Style::default().fg(Color::Red),
-            ),
-            Role::Thinking => (
-                "Think│ ",
-                Style::default()
-                    .fg(Color::DarkGray)
-                    .add_modifier(Modifier::BOLD),
-                Style::default().fg(Color::DarkGray),
-            ),
-        };
-
-        // The content area after the prefix
-        let prefix_len = prefix.chars().count() as u16;
-        let text_width = max_width.saturating_sub(prefix_len).max(1) as usize;
-
-        let text = msg.text.clone();
-        let wrapped = soft_wrap(&text, text_width);
-
-        for (i, segment) in wrapped.iter().enumerate() {
-            if i == 0 {
-                lines.push(Line::from(vec![
-                    Span::styled(prefix.to_string(), prefix_style),
-                    Span::styled(segment.clone(), text_style),
-                ]));
-            } else {
-                // continuation lines – indent by prefix width
-                let indent = " ".repeat(prefix_len as usize);
-                lines.push(Line::from(vec![
-                    Span::styled(indent, Style::default()),
-                    Span::styled(segment.clone(), text_style),
-                ]));
-            }
-        }
+        let mut msg_lines = build_message_line(msg, max_width);
+        lines.append(&mut msg_lines);
         // blank line between messages
         lines.push(Line::from(""));
     }
 
+    lines
+}
+
+fn build_message_line(msg: &LocalMessage, max_width: u16) -> Vec<Line<'static>> {
+    let (prefix, prefix_style, text_style, text) = match &msg {
+        LocalMessage::User(content) => (
+            "You  │ ",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+            Style::default().fg(Color::White),
+            content,
+        ),
+        LocalMessage::Assistant(content) => (
+            "AI   │ ",
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+            Style::default().fg(Color::White),
+            content,
+        ),
+        LocalMessage::Info(content) => (
+            "Info │ ",
+            Style::default().fg(Color::Yellow),
+            Style::default().fg(Color::DarkGray),
+            content,
+        ),
+        /*LocalMessage::Error => (
+            "Err  │ ",
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            Style::default().fg(Color::Red),
+
+        ),*/
+        LocalMessage::Thinking(content) => (
+            "Think│ ",
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::BOLD),
+            Style::default().fg(Color::DarkGray),
+            content,
+        ),
+        LocalMessage::ToolCall(tc) => (
+            "Tool │ ",
+            Style::default().fg(Color::Yellow),
+            Style::default().fg(Color::DarkGray),
+            &tc.to_string(),
+        ),
+        LocalMessage::ToolResponse { id, response } => (
+            "Tool │ ",
+            Style::default().fg(Color::Yellow),
+            Style::default().fg(Color::DarkGray),
+            response,
+        ),
+    };
+
+    // The content area after the prefix
+    let prefix_len = prefix.chars().count() as u16;
+    let text_width = max_width.saturating_sub(prefix_len).max(1) as usize;
+
+    let wrapped = soft_wrap(&text, text_width);
+
+    let mut lines = vec![];
+    for (i, segment) in wrapped.iter().enumerate() {
+        if i == 0 {
+            lines.push(Line::from(vec![
+                Span::styled(prefix.to_string(), prefix_style),
+                Span::styled(segment.clone(), text_style),
+            ]));
+        } else {
+            // continuation lines – indent by prefix width
+            let indent = " ".repeat(prefix_len as usize);
+            lines.push(Line::from(vec![
+                Span::styled(indent, Style::default()),
+                Span::styled(segment.clone(), text_style),
+            ]));
+        }
+    }
     lines
 }
 

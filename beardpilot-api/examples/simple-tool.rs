@@ -32,7 +32,7 @@ impl Tool for ListFiles {
         "List files in directory"
     }
 
-    async fn call(&mut self, parameters: Self::Params) -> Result<String, Self::Error> {
+    async fn call(&mut self, _: Self::Params) -> Result<String, Self::Error> {
         Ok("README.md\nCargo.toml\nsrc/\n".to_owned())
     }
 }
@@ -47,7 +47,7 @@ async fn main() -> Result<(), EndpointError> {
         Message::user("List files in current folder"),
     ];
     let tools: Vec<Box<dyn ErasedTool>> = vec![Box::new(ListFiles::new())];
-    let chat = Chat::new("mistral-small-latest", messages)
+    let chat = Chat::builder("mistral-small-latest", messages)
         .with_tools(tools)
         .build();
     let response = client.chat(chat).await?;

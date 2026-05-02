@@ -2,6 +2,8 @@ use schemars::{JsonSchema, Schema};
 use serde_json::Value;
 use std::{future::Future, pin::Pin};
 
+type ToolOutput = Result<String, Box<dyn std::error::Error + Send + Sync>>;
+
 pub trait ErasedTool: Send {
     fn name(&self) -> &'static str;
     fn description(&self) -> &'static str;
@@ -9,14 +11,8 @@ pub trait ErasedTool: Send {
 
     fn call_erased(
         &mut self,
-        parameters: Value, // JSON crudo en lugar de Params tipado
-    ) -> Pin<
-        Box<
-            dyn Future<Output = Result<String, Box<dyn std::error::Error + Send + Sync>>>
-                + Send
-                + '_,
-        >,
-    >;
+        parameters: Value,
+    ) -> Pin<Box<dyn Future<Output = ToolOutput> + Send + '_>>;
 }
 
 impl<T> ErasedTool for T

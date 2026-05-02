@@ -11,6 +11,7 @@ use crate::endpoint::{
     tag::TagList,
     version::Version,
 };
+use crate::endpoint::EndpointStream;
 use crate::error::{EndpointError, ProviderError};
 
 #[derive(Debug)]
@@ -78,13 +79,13 @@ impl MistralClient {
         request: Req,
     ) -> Result<impl Stream<Item = Result<Resp, EndpointError>>, EndpointError>
     where
-        Req: serde::ser::Serialize,
+        Req: serde::ser::Serialize + Debug,
         Resp: serde::de::DeserializeOwned + Unpin + Debug,
     {
         use std::marker::PhantomData;
+        use log::debug;
 
-        use crate::endpoint::EndpointStream;
-
+        debug!("Request: {:?}: {:?}", endpoint, serde_json::to_string(&request));
         let response = self
             .reqwest_client
             .post(self.url.join(endpoint).unwrap())

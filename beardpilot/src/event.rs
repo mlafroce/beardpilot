@@ -1,6 +1,5 @@
 use beardpilot_api::endpoint::chat::{Chat, ChatStreamResponse};
 use crossterm::event::Event;
-use tokio::sync::oneshot;
 
 pub enum AppEvent {
     UiEvent(Event),
@@ -9,10 +8,6 @@ pub enum AppEvent {
 
 pub enum SessionEvent {
     SendChat(Chat),
-    ConfirmationRequest {
-        prompt: String,
-        response: oneshot::Sender<bool>,
-    },
 }
 
 pub enum UiAction {

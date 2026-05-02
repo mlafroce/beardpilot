@@ -1,4 +1,5 @@
 use beardpilot_api::client::mistral::MistralClient;
+use beardpilot_api::endpoint::chat::FinishReason;
 use crossterm::event::EventStream;
 use futures_util::StreamExt;
 use tokio::sync::mpsc::{self, unbounded_channel, UnboundedSender};
@@ -71,8 +72,12 @@ impl App {
                     self.redraw()?;
                 }
                 Some(AppEvent::ResponseChunk(chunk)) => {
-                    debug!("Received chunk: {:?}", chunk);
-                    self.state.conversation.push_chunk(chunk);
+                    self.state.conversation.push_chunk(chunk.clone()).await?;
+                    if let Some(FinishReason::ToolCalls) = chunk.done() {
+                        let _ = session_sender.send(SessionEvent::SendChat(
+                            self.state.conversation.session_chat(),
+                        ));
+                    }
                     self.tui.scroll_to_bottom();
                     self.redraw()?;
                 }

@@ -1,4 +1,4 @@
-use crate::error::AppError;
+use crate::error::{AppError, AppResult};
 use crate::event::{AppEvent, SessionEvent};
 use beardpilot_api::client::MistralClient;
 use beardpilot_api::endpoint::chat::{Chat, MessageRole};
@@ -34,22 +34,18 @@ impl Session {
         self.sender.clone()
     }
 
-    pub async fn run(mut self) {
+    pub async fn run(mut self) -> () {
         while let Some(message) = self.receiver.recv().await {
             match message {
                 SessionEvent::SendChat(messages) => {
                     debug!("SessionEvent::SubmitPrompt");
                     let _ = self.send_chat(messages).await;
                 }
-                SessionEvent::ConfirmationRequest { prompt, response } => {
-                    debug!("Confirmation request: {}", prompt);
-                    let _ = response.send(true);
-                }
             }
         }
     }
 
-    pub async fn send_chat(&mut self, chat: Chat) -> Result<(), AppError> {
+    pub async fn send_chat(&mut self, chat: Chat) -> AppResult<()> {
         let mut response = self.provider.chat_stream(chat).await?;
         while let Some(chunk) = response.next().await {
             let chunk = chunk?;
