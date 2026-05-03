@@ -336,6 +336,12 @@ pub struct ChatBaseResponse<T> {
     //pub message: Message,
     pub choices: Vec<T>,
 
+    pub usage: Option<UsageInfo>,
+}
+
+/*
+    TODO: Ollama support:
+
     ///Indicates whether generation has finished
     #[serde(default)]
     pub done: bool,
@@ -346,7 +352,7 @@ pub struct ChatBaseResponse<T> {
 
     #[serde(flatten, default, skip_serializing_if = "Option::is_none")]
     pub final_data: Option<ChatMessageFinalResponseData>,
-}
+*/
 
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct Choice {
@@ -387,6 +393,16 @@ pub struct ChatMessageFinalResponseData {
     pub eval_duration: i64,
 }
 
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct UsageInfo {
+    /// Input tokens
+    pub prompt_tokens: Option<i32>,
+    /// Output tokens
+    pub completion_tokens: i32,
+    pub num_cached_tokens: Option<i32>,
+    pub total_tokens: Option<i32>,
+}
+
 impl ChatBaseResponse<Choice> {
     pub fn thinking(&self) -> &str {
         &self.choices[0].message.thinking
@@ -401,11 +417,7 @@ impl ChatBaseResponse<Choice> {
     }
 
     pub fn done(&self) -> Option<FinishReason> {
-        if self.done {
-            Some(FinishReason::Stop)
-        } else {
-            self.choices[0].finish_reason.clone()
-        }
+        self.choices[0].finish_reason.clone()
     }
 }
 
@@ -423,11 +435,7 @@ impl ChatBaseResponse<StreamChoice> {
     }
 
     pub fn done(&self) -> Option<FinishReason> {
-        if self.done {
-            Some(FinishReason::Stop)
-        } else {
-            self.choices[0].finish_reason.clone()
-        }
+        self.choices[0].finish_reason.clone()
     }
 
     pub fn tool_calls(&self) -> Option<Vec<ToolCallMessage>> {

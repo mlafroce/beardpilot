@@ -1,51 +1,32 @@
-use beardpilot_api::generation::tools::Tool;
+use beardpilot_api::endpoint::tool::Tool;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use tokio::sync::mpsc::UnboundedSender;
-use tracing::debug;
 
-use crate::event::SessionEvent;
+use crate::tools::ToolError;
 
 #[derive(Deserialize, JsonSchema)]
 pub struct Params {
     #[schemars(description = "Expression to find in folder or file. Accepts regex.")]
     expression: String,
-    #[schemars(
-        description = "Path to the file or folder to search in. Defaults to current directory if not provided."
-    )]
     path: Option<String>,
 }
 
-pub struct Find {
-    sender: UnboundedSender<SessionEvent>,
-}
-
-impl Find {
-    pub fn new(sender: UnboundedSender<SessionEvent>) -> Self {
-        Self { sender }
-    }
-}
+pub struct Find {}
 
 impl Tool for Find {
     type Params = Params;
+    type Error = ToolError;
 
-    fn name() -> &'static str {
+    fn name(&self) -> &'static str {
         "Find"
     }
 
-    fn description() -> &'static str {
+    fn description(&self) -> &'static str {
         "Finds an expression in a file or folder"
     }
 
-    async fn call(
-        &mut self,
-        parameters: Self::Params,
-    ) -> Result<String, Box<dyn std::error::Error + Sync + Send>> {
+    async fn call(&mut self, parameters: Self::Params) -> Result<String, Self::Error> {
         let search_path = parameters.path.as_deref().unwrap_or(".");
-        //let (conf_sender, response) = tokio::sync::oneshot::channel();
-        //let prompt = format!("Confirm 'grep -rn {}'", parameters.expression);
-        //self.sender.send(SessionEvent::ConfirmationRequest{prompt, response: conf_sender}).unwrap();
-
         let output = tokio::process::Command::new("grep")
             .args(["-rn", &parameters.expression, search_path])
             .output()
@@ -58,7 +39,7 @@ impl Tool for Find {
             Ok(format!("No matches found for '{}'", parameters.expression))
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-            Ok(format!("grep failed: {}", stderr).into())
+            Ok(format!("grep failed: {}", stderr))
         }
     }
 }

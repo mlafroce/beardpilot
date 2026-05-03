@@ -111,10 +111,11 @@ impl Conversation {
 
     /// If final token-usage data is present, append an info message.
     fn append_token_usage(&mut self, response: &ChatStreamResponse) {
-        if let Some(data) = &response.final_data {
+        if let Some(usage ) = &response.usage {
+            let sent = usage.prompt_tokens.unwrap_or(0);
+            let received = usage.completion_tokens;
             self.messages.push(LocalMessage::Info(format!(
-                "Tokens sent: {} | received: {}",
-                data.prompt_eval_count, data.eval_count
+                "Tokens sent: {sent} | received: {received}"
             )));
         }
     }

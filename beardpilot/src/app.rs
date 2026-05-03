@@ -4,7 +4,6 @@ use crossterm::event::EventStream;
 use futures_util::StreamExt;
 use tokio::sync::mpsc::{self, unbounded_channel, UnboundedSender};
 use tokio::task::JoinSet;
-use tracing::debug;
 
 use crate::chat::conversation::{Conversation, ModelInfo};
 use crate::chat::session::Session;

@@ -2,8 +2,10 @@ use beardpilot_api::endpoint::tool::Tool;
 use schemars::JsonSchema;
 use serde::Deserialize;
 
+use crate::tools::ToolError;
+
 #[derive(Deserialize, JsonSchema)]
-pub struct ListFilesParams {
+pub struct Params {
     path: Option<String>,
     show_hidden: bool,
 }
@@ -11,17 +13,9 @@ pub struct ListFilesParams {
 #[derive(Default)]
 pub struct ListFiles;
 
-#[derive(Debug, thiserror::Error)]
-pub enum ListFilesError {
-    #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
-    #[error("UTF-8 error: {0}")]
-    Utf8(#[from] std::string::FromUtf8Error),
-}
-
 impl Tool for ListFiles {
-    type Params = ListFilesParams;
-    type Error = ListFilesError;
+    type Params = Params;
+    type Error = ToolError;
 
     fn name(&self) -> &'static str {
         "ListFiles"

@@ -1,7 +1,8 @@
-use beardpilot_api::generation::tools::Tool;
+use beardpilot_api::endpoint::tool::Tool;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+
+use crate::tools::ToolError;
 
 #[derive(Deserialize, JsonSchema)]
 pub struct Params {
@@ -14,19 +15,17 @@ pub struct Bash {}
 
 impl Tool for Bash {
     type Params = Params;
+    type Error = ToolError;
 
-    fn name() -> &'static str {
+    fn name(&self) -> &'static str {
         "Bash"
     }
 
-    fn description() -> &'static str {
+    fn description(&self) -> &'static str {
         "Executes commands via bash"
     }
 
-    async fn call(
-        &mut self,
-        parameters: Self::Params,
-    ) -> Result<String, Box<dyn std::error::Error + Sync + Send>> {
+    async fn call(&mut self, parameters: Self::Params) -> Result<String, Self::Error> {
         let output = tokio::process::Command::new("bash")
             .arg("-c")
             .arg(&parameters.command)
@@ -37,7 +36,7 @@ impl Tool for Bash {
             Ok(String::from_utf8_lossy(&output.stdout).into_owned())
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-            Ok(format!("Bash execution failed: {}", stderr).into())
+            Ok(format!("Bash execution failed: {}", stderr))
         }
     }
 }

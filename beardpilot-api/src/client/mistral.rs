@@ -3,6 +3,7 @@ use futures_util::Stream;
 use std::fmt::Debug;
 use url::Url;
 
+use crate::endpoint::EndpointStream;
 use crate::endpoint::{
     chat::{Chat, ChatSimpleResponse, ChatStreamResponse},
     embed::{Embed, EmbedResponse},
@@ -11,7 +12,6 @@ use crate::endpoint::{
     tag::TagList,
     version::Version,
 };
-use crate::endpoint::EndpointStream;
 use crate::error::{EndpointError, ProviderError};
 
 #[derive(Debug)]
@@ -82,10 +82,14 @@ impl MistralClient {
         Req: serde::ser::Serialize + Debug,
         Resp: serde::de::DeserializeOwned + Unpin + Debug,
     {
-        use std::marker::PhantomData;
         use log::debug;
+        use std::marker::PhantomData;
 
-        debug!("Request: {:?}: {:?}", endpoint, serde_json::to_string(&request));
+        debug!(
+            "Request: {:?}: {:?}",
+            endpoint,
+            serde_json::to_string(&request)
+        );
         let response = self
             .reqwest_client
             .post(self.url.join(endpoint).unwrap())

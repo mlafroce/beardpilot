@@ -345,7 +345,7 @@ fn build_message_line(msg: &LocalMessage, max_width: u16) -> Vec<Line<'static>> 
             Style::default().fg(Color::DarkGray),
             &tc.to_string(),
         ),
-        LocalMessage::ToolResponse { id, response } => (
+        LocalMessage::ToolResponse { id: _, response } => (
             "Tool │ ",
             Style::default().fg(Color::Yellow),
             Style::default().fg(Color::DarkGray),
@@ -357,7 +357,7 @@ fn build_message_line(msg: &LocalMessage, max_width: u16) -> Vec<Line<'static>> 
     let prefix_len = prefix.chars().count() as u16;
     let text_width = max_width.saturating_sub(prefix_len).max(1) as usize;
 
-    let wrapped = soft_wrap(&text, text_width);
+    let wrapped = soft_wrap(text, text_width);
 
     let mut lines = vec![];
     for (i, segment) in wrapped.iter().enumerate() {
