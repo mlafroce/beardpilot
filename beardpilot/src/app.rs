@@ -1,19 +1,21 @@
 use beardpilot_api::client::mistral::MistralClient;
-use beardpilot_api::endpoint::chat::FinishReason;
+use beardpilot_api::endpoint::tool::Tool;
 use crossterm::event::EventStream;
 use futures_util::StreamExt;
 use tokio::sync::mpsc::{self, unbounded_channel, UnboundedSender};
 use tokio::task::JoinSet;
 
-use crate::chat::conversation::{Conversation, ModelInfo};
+use crate::chat::conversation::{Conversation, ModelInfo, ResponseAction, ResponseStatus};
 use crate::chat::session::Session;
+use crate::chat::tool_registry::{ToolCall, ToolRegistry};
 use crate::config::AppConfig;
-use crate::error::AppError;
+use crate::error::{AppError, AppResult};
 use crate::event::{AppEvent, SessionEvent, UiAction};
 use crate::ui::tui::Tui;
 
 pub struct AppState {
     pub conversation: Conversation,
+    pub tool_registry: ToolRegistry,
 }
 
 /// Top-level application struct that owns all components and drives the main loop.
@@ -24,19 +26,20 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(config: AppConfig) -> Result<Self, AppError> {
+    pub fn new(config: AppConfig) -> AppResult<Self> {
         let tui = Tui::new().map_err(AppError::Io)?;
         let model_info = ModelInfo {
             model_name: config.model.clone(),
             max_tokens: None,
         };
         let conversation = Conversation::new(config.system_prompt.clone(), model_info);
-        let state = AppState { conversation };
+        let tool_registry = ToolRegistry::new();
+        let state = AppState { conversation, tool_registry };
         Ok(Self { config, tui, state })
     }
 
     /// Run the interactive chat loop until the user exits.
-    pub async fn run(&mut self) -> Result<(), AppError> {
+    pub async fn run(&mut self) -> AppResult<()> {
         // Initial render
         let mistral = MistralClient::new(&self.config.host, self.config.api_key.as_ref().unwrap())?;
         let (sender, mut receiver) = unbounded_channel();
@@ -61,21 +64,16 @@ impl App {
                     match action {
                         UiAction::Quit => break,
                         UiAction::Submit(text) => {
-                            self.state.conversation.push_user(text);
-                            let _ = session_sender.send(SessionEvent::SendChat(
-                                self.state.conversation.session_chat(),
-                            ));
+                            self.handle_submit(&session_sender, text).await;
                         }
                         _ => {}
                     }
                     self.redraw()?;
                 }
                 Some(AppEvent::ResponseChunk(chunk)) => {
-                    self.state.conversation.push_chunk(chunk.clone()).await?;
-                    if let Some(FinishReason::ToolCalls) = chunk.done() {
-                        let _ = session_sender.send(SessionEvent::SendChat(
-                            self.state.conversation.session_chat(),
-                        ));
+                    let action = self.state.conversation.push_chunk(chunk.clone())?;
+                    if let ResponseAction::ToolCalls(tool_calls) = action {
+                        self.state.tool_registry.queue_tool_calls(tool_calls);
                     }
                     self.tui.scroll_to_bottom();
                     self.redraw()?;
@@ -84,6 +82,24 @@ impl App {
             }
         }
         Ok(())
+    }
+
+    async fn handle_submit(&mut self, session_sender: &UnboundedSender<SessionEvent>, text: String) {
+        match self.state.tool_registry.pop_pending_call() {
+            Some(tool_call) => {
+                if text == "y" {
+                    let id = tool_call.id.clone();
+                    self.state.conversation.push_tool_call(tool_call.clone());
+                    let response = self.state.tool_registry.call_tool(tool_call).await.unwrap();
+                    self.state.conversation.push_tool_response(id, response);
+                }
+            },
+            None => {
+                self.state.conversation.push_user(text);
+            }
+        }
+        let _ = session_sender.send(SessionEvent::SendChat(
+        self.state.conversation.session_chat(&self.state.tool_registry)));
     }
 
     fn spawn_session_actor(

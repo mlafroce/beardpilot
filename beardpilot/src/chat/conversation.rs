@@ -5,7 +5,7 @@ use beardpilot_api::endpoint::chat::{
 };
 
 use crate::{
-    chat::tool_registry::{ToolCall, ToolRegistry},
+    chat::tool_registry::{self, ToolCall, ToolRegistry},
     error::AppResult,
 };
 
@@ -15,6 +15,13 @@ pub enum ResponseStatus {
     Waiting,
     Thinking,
     ReceiveResponse,
+}
+
+/// What to do after response arrived
+pub enum ResponseAction {
+    Done,
+    Streaming,
+    ToolCalls(Vec<ToolCall>),
 }
 
 /// Metadata about the model being used in this conversation.
@@ -47,9 +54,8 @@ pub enum LocalMessage {
 pub struct Conversation {
     messages: Vec<LocalMessage>,
     system_prompt: Option<String>,
-    tool_registry: ToolRegistry,
     pub model_info: ModelInfo,
-    conversation_status: ResponseStatus,
+    pub conversation_status: ResponseStatus,
     tool_call_buffer: ToolCallBuffer,
 }
 
@@ -57,7 +63,6 @@ impl Conversation {
     pub fn new(system_prompt: Option<String>, model_info: ModelInfo) -> Self {
         Self {
             messages: vec![],
-            tool_registry: ToolRegistry::new(),
             system_prompt,
             model_info,
             conversation_status: ResponseStatus::Waiting,
@@ -75,15 +80,32 @@ impl Conversation {
         self.messages.push(msg);
     }
 
+    pub fn push_tool_call(&mut self, tool_call: ToolCall) {
+        let msg = LocalMessage::ToolCall(tool_call);
+        self.messages.push(msg);
+    }
+
+    pub fn push_tool_response(&mut self, id: String, response: String) {
+        let msg = LocalMessage::ToolResponse { id, response };
+        self.messages.push(msg);
+    }
+
     /// Append a streaming response chunk to the conversation.
-    pub async fn push_chunk(&mut self, response: ChatStreamResponse) -> AppResult<()> {
+    pub fn push_chunk(&mut self, response: ChatStreamResponse) -> AppResult<ResponseAction> {
         self.tool_call_buffer.push(response.tool_calls());
         self.append_stream_text(&response);
         match response.done() {
-            Some(FinishReason::ToolCalls) => self.flush_and_execute_tool_calls().await?,
-            _ => self.append_token_usage(&response),
+            Some(FinishReason::ToolCalls) => {
+                Ok(ResponseAction::ToolCalls(self.tool_call_buffer.take()))
+            },
+            Some(_) => {
+                self.append_token_usage(&response);
+                Ok(ResponseAction::Done)
+            },
+            None => {
+                Ok(ResponseAction::Streaming)
+            }
         }
-        Ok(())
     }
 
     /// Append the thinking or content text from this chunk to the last message,
@@ -120,20 +142,6 @@ impl Conversation {
         }
     }
 
-    /// Drain the tool-call buffer, execute each call, and append the results.
-    async fn flush_and_execute_tool_calls(&mut self) -> AppResult<()> {
-        let tool_calls = self.tool_call_buffer.take();
-        for call in tool_calls {
-            let id = call.id.clone();
-            self.messages.push(LocalMessage::ToolCall(call.clone()));
-            let response = self.tool_registry.call_tool(call).await?;
-            self.messages
-                .push(LocalMessage::ToolResponse { id, response });
-        }
-        self.conversation_status = ResponseStatus::Waiting;
-        Ok(())
-    }
-
     /// Return the full message list
     pub fn messages(&self) -> &[LocalMessage] {
         &self.messages
@@ -143,10 +151,10 @@ impl Conversation {
         self.conversation_status.clone()
     }
 
-    pub fn session_chat(&self) -> Chat {
+    pub fn session_chat(&self, tool_registry: &ToolRegistry) -> Chat {
         let messages = self.session_messages();
         let model = self.model_info.model_name.clone();
-        let tools = self.tool_registry.get_chat_tools();
+        let tools = tool_registry.get_chat_tools();
         Chat {
             model,
             messages,

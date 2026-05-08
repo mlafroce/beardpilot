@@ -19,7 +19,7 @@ use std::io::{self, Stdout};
 
 use crate::{
     app::AppState,
-    chat::conversation::{Conversation, LocalMessage, ModelInfo, ResponseStatus},
+    chat::{conversation::{Conversation, LocalMessage, ModelInfo, ResponseStatus}, tool_registry::{self, ToolCall}},
     event::UiAction,
     ui::input::TextInput,
 };
@@ -78,8 +78,14 @@ impl Tui {
         // Build model status label outside the closure to avoid borrow issues.
         let status_label = build_model_status(&state.conversation.model_info);
 
+        let pending_calls = state.tool_registry.peek_pending_calls();
+        let notification = pending_calls
+            .map(|tc| {
+                tc.to_string()
+            });
+
         self.terminal.draw(|frame| {
-            let (msgs_area, input_area) = split_layout(frame.area());
+            let (msgs_area, notif_area, input_area) = split_layout(frame.area(), notification.is_some());
             messages_area_height = msgs_area.height;
 
             let lines = build_message_lines(&state.conversation, msgs_area.width.saturating_sub(2));
@@ -95,6 +101,10 @@ impl Tui {
                 .wrap(Wrap { trim: false })
                 .scroll((self.scroll, 0));
             frame.render_widget(msgs_paragraph, msgs_area);
+
+            if let (Some(area), Some(text)) = (notif_area, &notification) {
+                render_notification(frame, area, text);
+            }
 
             let res_status = state.conversation.conversation_status();
             render_input(frame, input_area, &self.input, res_status, &status_label);
@@ -253,14 +263,14 @@ impl Tui {
     pub fn messages_area(&self) -> Rect {
         let size = self.terminal.size().unwrap_or_default();
         let area = Rect::new(0, 0, size.width, size.height);
-        split_layout(area).0
+        split_layout(area, false).0
     }
 
     /// Returns the terminal area of the input pane.
     pub fn input_area(&self) -> Rect {
         let size = self.terminal.size().unwrap_or_default();
         let area = Rect::new(0, 0, size.width, size.height);
-        split_layout(area).1
+        split_layout(area, false).2
     }
 }
 
@@ -272,14 +282,24 @@ impl Drop for Tui {
 
 // ── layout helpers ─────────────────────────────────────────────────────────────
 
-/// Split the terminal into [messages_area, input_area].
+/// Split the terminal into [messages_area, optional_notification_area, input_area].
 /// The input area is 4 rows tall: 3 for the bordered box + 1 for the status line.
-fn split_layout(area: Rect) -> (Rect, Rect) {
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(3), Constraint::Length(4)])
-        .split(area);
-    (chunks[0], chunks[1])
+/// When `has_notification` is true an extra 3-row bordered notification strip is
+/// inserted between the messages pane and the input area.
+fn split_layout(area: Rect, has_notification: bool) -> (Rect, Option<Rect>, Rect) {
+    if has_notification {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(3), Constraint::Length(3), Constraint::Length(4)])
+            .split(area);
+        (chunks[0], Some(chunks[1]), chunks[2])
+    } else {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(3), Constraint::Length(4)])
+            .split(area);
+        (chunks[0], None, chunks[1])
+    }
 }
 
 // ── rendering helpers ──────────────────────────────────────────────────────────
@@ -407,6 +427,23 @@ fn build_model_status(info: &ModelInfo) -> String {
         Some(max) => format!(" model: {}  │  max tokens: {} ", info.model_name, max),
         None => format!(" model: {} ", info.model_name),
     }
+}
+
+/// Render a notification strip between the messages pane and the input box.
+fn render_notification(frame: &mut Frame, area: Rect, text: &str) {
+    let paragraph = Paragraph::new(Span::styled(
+        format!(" ⚠  {} ", text),
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD),
+    ))
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Yellow))
+            .title(" notification "),
+    );
+    frame.render_widget(paragraph, area);
 }
 
 /// Render the input box and a status line below it.

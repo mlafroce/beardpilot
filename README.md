@@ -108,8 +108,13 @@ Not production ready.
 
 ## Roadmap
 
-* [ ] Command execution layer
+* [x] Command execution layer (`Bash`, `Read`, `Find`, `ListFiles` tools)
 * [ ] Context optimization strategies
-* [ ] File system awareness
+* [x] File system awareness
 * [ ] Plugin/tool system
 * [ ] Multi-step planning
+* [ ] Write/Edit tools
+* [ ] Interrupt in-flight requests without quitting
+* [ ] Tool output truncation
+* [ ] Persist conversation history across sessions
+* [ ] Configurable provider
