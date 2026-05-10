@@ -11,28 +11,23 @@ use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Wrap},
+    text::Span,
+    widgets::{Block, Borders, Paragraph},
     Frame, Terminal,
 };
 use std::io::{self, Stdout};
 
 use crate::{
     app::AppState,
-    chat::{conversation::{Conversation, LocalMessage, ModelInfo, ResponseStatus}, tool_registry::{self, ToolCall}},
+    chat::conversation::{ModelInfo, ResponseStatus},
     event::UiAction,
-    ui::input::TextInput,
+    ui::{input::TextInput, message_area::TuiMainArea},
 };
 
 pub struct Tui {
     terminal: Terminal<CrosstermBackend<Stdout>>,
+    message_area: TuiMainArea,
     input: TextInput,
-    /// Cached height of the last-rendered messages area (in terminal rows).
-    messages_area_height: u16,
-    /// Cached total number of rendered lines in the messages pane.
-    total_messages_lines: u16,
-    /// Scroll offset for the messages pane (in lines).
-    scroll: u16,
 }
 
 impl Tui {
@@ -46,9 +41,7 @@ impl Tui {
         Ok(Self {
             terminal,
             input: TextInput::new(),
-            messages_area_height: 0,
-            total_messages_lines: 0,
-            scroll: 0,
+            message_area: TuiMainArea::default(),
         })
     }
 
@@ -71,47 +64,24 @@ impl Tui {
     /// * `thinking`   – when `true` a "thinking…" indicator replaces the cursor.
     /// * `model_info` – model metadata shown below the input box.
     pub fn draw(&mut self, state: &AppState) -> io::Result<()> {
-        // We capture the two cached values from the draw call.
-        let mut messages_area_height = self.messages_area_height;
-        let mut total_messages_lines = self.total_messages_lines;
-
         // Build model status label outside the closure to avoid borrow issues.
         let status_label = build_model_status(&state.conversation.model_info);
 
         let pending_calls = state.tool_registry.peek_pending_calls();
-        let notification = pending_calls
-            .map(|tc| {
-                tc.to_string()
-            });
+        let notification = pending_calls.map(|tc| tc.to_string());
 
         self.terminal.draw(|frame| {
-            let (msgs_area, notif_area, input_area) = split_layout(frame.area(), notification.is_some());
-            messages_area_height = msgs_area.height;
-
-            let lines = build_message_lines(&state.conversation, msgs_area.width.saturating_sub(2));
-            total_messages_lines = lines.len() as u16;
-
-            let msgs_paragraph = Paragraph::new(lines)
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .title(" beardpilot ")
-                        .title_style(Style::default().add_modifier(Modifier::BOLD)),
-                )
-                .wrap(Wrap { trim: false })
-                .scroll((self.scroll, 0));
-            frame.render_widget(msgs_paragraph, msgs_area);
+            let (msgs_area, notif_area, input_area) =
+                split_layout(frame.area(), notification.is_some());
+            self.message_area.render(frame, msgs_area, state);
 
             if let (Some(area), Some(text)) = (notif_area, &notification) {
                 render_notification(frame, area, text);
             }
 
             let res_status = state.conversation.conversation_status();
-            render_input(frame, input_area, &self.input, res_status, &status_label);
+            TuiInput::render(frame, input_area, &self.input, res_status, &status_label);
         })?;
-
-        self.messages_area_height = messages_area_height;
-        self.total_messages_lines = total_messages_lines;
 
         Ok(())
     }
@@ -187,10 +157,12 @@ impl Tui {
                 self.input.move_end();
             }
             KeyCode::Up | KeyCode::PageUp => {
-                self.scroll_up(if key.code == KeyCode::PageUp { 10 } else { 3 });
+                self.message_area
+                    .scroll_up(if key.code == KeyCode::PageUp { 10 } else { 3 });
             }
             KeyCode::Down | KeyCode::PageDown => {
-                self.scroll_down(if key.code == KeyCode::PageDown { 10 } else { 3 });
+                self.message_area
+                    .scroll_down(if key.code == KeyCode::PageDown { 10 } else { 3 });
             }
 
             _ => {}
@@ -217,45 +189,15 @@ impl Tui {
 
             // Scroll wheel in the messages pane
             MouseEventKind::ScrollUp if mouse.row < msgs_area.bottom() => {
-                self.scroll_up(3);
+                self.message_area.scroll_up(3);
             }
             MouseEventKind::ScrollDown if mouse.row < msgs_area.bottom() => {
-                self.scroll_down(3);
+                self.message_area.scroll_down(3);
             }
 
             _ => {}
         }
         UiAction::None
-    }
-
-    // ── scroll helpers ─────────────────────────────────────────────────────
-
-    fn scroll_up(&mut self, lines: u16) {
-        self.scroll = self.scroll.saturating_sub(lines);
-    }
-
-    fn scroll_down(&mut self, lines: u16) {
-        let total = self.total_messages_lines();
-        let visible = self.messages_area_height();
-        let max_scroll = total.saturating_sub(visible);
-        self.scroll = (self.scroll + lines).min(max_scroll);
-    }
-
-    /// Scroll the messages pane to the very bottom.
-    pub fn scroll_to_bottom(&mut self) {
-        let total = self.total_messages_lines();
-        let visible = self.messages_area_height();
-        self.scroll = total.saturating_sub(visible);
-    }
-
-    /// Height of the messages area from the last draw call (inner, excluding borders).
-    pub fn messages_area_height(&self) -> u16 {
-        self.messages_area_height.saturating_sub(2) // subtract top+bottom border
-    }
-
-    /// Total lines rendered in the messages pane from the last draw call.
-    pub fn total_messages_lines(&self) -> u16 {
-        self.total_messages_lines
     }
 
     /// Returns the terminal area of the messages pane so callers can check
@@ -271,6 +213,10 @@ impl Tui {
         let size = self.terminal.size().unwrap_or_default();
         let area = Rect::new(0, 0, size.width, size.height);
         split_layout(area, false).2
+    }
+
+    pub fn scroll_to_bottom(&mut self) {
+        self.message_area.scroll_to_bottom();
     }
 }
 
@@ -290,7 +236,11 @@ fn split_layout(area: Rect, has_notification: bool) -> (Rect, Option<Rect>, Rect
     if has_notification {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Min(3), Constraint::Length(3), Constraint::Length(4)])
+            .constraints([
+                Constraint::Min(3),
+                Constraint::Length(3),
+                Constraint::Length(4),
+            ])
             .split(area);
         (chunks[0], Some(chunks[1]), chunks[2])
     } else {
@@ -303,123 +253,6 @@ fn split_layout(area: Rect, has_notification: bool) -> (Rect, Option<Rect>, Rect
 }
 
 // ── rendering helpers ──────────────────────────────────────────────────────────
-
-/// Build all `Line`s to display in the messages pane.
-///
-/// Long messages are pre-wrapped at `max_width` columns so the scroll-line
-/// count stays accurate.
-fn build_message_lines(conversation: &Conversation, max_width: u16) -> Vec<Line<'static>> {
-    let mut lines: Vec<Line<'static>> = Vec::new();
-
-    for msg in conversation.messages() {
-        let mut msg_lines = build_message_line(msg, max_width);
-        lines.append(&mut msg_lines);
-        // blank line between messages
-        lines.push(Line::from(""));
-    }
-
-    lines
-}
-
-fn build_message_line(msg: &LocalMessage, max_width: u16) -> Vec<Line<'static>> {
-    let (prefix, prefix_style, text_style, text) = match &msg {
-        LocalMessage::User(content) => (
-            "You  │ ",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-            Style::default().fg(Color::White),
-            content,
-        ),
-        LocalMessage::Assistant(content) => (
-            "AI   │ ",
-            Style::default()
-                .fg(Color::Green)
-                .add_modifier(Modifier::BOLD),
-            Style::default().fg(Color::White),
-            content,
-        ),
-        LocalMessage::Info(content) => (
-            "Info │ ",
-            Style::default().fg(Color::Yellow),
-            Style::default().fg(Color::DarkGray),
-            content,
-        ),
-        /*LocalMessage::Error => (
-            "Err  │ ",
-            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-            Style::default().fg(Color::Red),
-
-        ),*/
-        LocalMessage::Thinking(content) => (
-            "Think│ ",
-            Style::default()
-                .fg(Color::DarkGray)
-                .add_modifier(Modifier::BOLD),
-            Style::default().fg(Color::DarkGray),
-            content,
-        ),
-        LocalMessage::ToolCall(tc) => (
-            "Tool │ ",
-            Style::default().fg(Color::Yellow),
-            Style::default().fg(Color::DarkGray),
-            &tc.to_string(),
-        ),
-        LocalMessage::ToolResponse { id: _, response } => (
-            "Tool │ ",
-            Style::default().fg(Color::Yellow),
-            Style::default().fg(Color::DarkGray),
-            response,
-        ),
-    };
-
-    // The content area after the prefix
-    let prefix_len = prefix.chars().count() as u16;
-    let text_width = max_width.saturating_sub(prefix_len).max(1) as usize;
-
-    let wrapped = soft_wrap(text, text_width);
-
-    let mut lines = vec![];
-    for (i, segment) in wrapped.iter().enumerate() {
-        if i == 0 {
-            lines.push(Line::from(vec![
-                Span::styled(prefix.to_string(), prefix_style),
-                Span::styled(segment.clone(), text_style),
-            ]));
-        } else {
-            // continuation lines – indent by prefix width
-            let indent = " ".repeat(prefix_len as usize);
-            lines.push(Line::from(vec![
-                Span::styled(indent, Style::default()),
-                Span::styled(segment.clone(), text_style),
-            ]));
-        }
-    }
-    lines
-}
-
-/// Break `text` into lines of at most `width` columns, respecting existing
-/// newlines.
-fn soft_wrap(text: &str, width: usize) -> Vec<String> {
-    let mut result = Vec::new();
-    for raw_line in text.split('\n') {
-        if raw_line.is_empty() {
-            result.push(String::new());
-            continue;
-        }
-        let chars: Vec<char> = raw_line.chars().collect();
-        let mut start = 0;
-        while start < chars.len() {
-            let end = (start + width).min(chars.len());
-            result.push(chars[start..end].iter().collect());
-            start = end;
-        }
-    }
-    if result.is_empty() {
-        result.push(String::new());
-    }
-    result
-}
 
 /// Build a one-line status string from `ModelInfo`.
 fn build_model_status(info: &ModelInfo) -> String {
@@ -446,52 +279,56 @@ fn render_notification(frame: &mut Frame, area: Rect, text: &str) {
     frame.render_widget(paragraph, area);
 }
 
-/// Render the input box and a status line below it.
-///
-/// `area` must be at least 4 rows tall: 3 for the bordered input box + 1 for
-/// the model-info status line.
-fn render_input(
-    frame: &mut Frame,
-    area: Rect,
-    input: &TextInput,
-    res_status: ResponseStatus,
-    status_label: &str,
-) {
-    // Split the area: top 3 rows → input box, bottom 1 row → status line.
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Length(1)])
-        .split(area);
-    let box_area = chunks[0];
-    let status_area = chunks[1];
+pub struct TuiInput;
 
-    // ── input box ──────────────────────────────────────────────────────────
-    let title = match res_status {
-        ResponseStatus::ReceiveResponse => " reading ",
-        ResponseStatus::Thinking => " thinking ",
-        ResponseStatus::Waiting => " message ",
-    };
-    let block = Block::default().borders(Borders::ALL).title(title);
-    let inner = block.inner(box_area);
+impl TuiInput {
+    /// Render the input box and a status line below it.
+    ///
+    /// `area` must be at least 4 rows tall: 3 for the bordered input box + 1 for
+    /// the model-info status line.
+    fn render(
+        frame: &mut Frame,
+        area: Rect,
+        input: &TextInput,
+        res_status: ResponseStatus,
+        status_label: &str,
+    ) {
+        // Split the area: top 3 rows → input box, bottom 1 row → status line.
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(3), Constraint::Length(1)])
+            .split(area);
+        let box_area = chunks[0];
+        let status_area = chunks[1];
 
-    let prompt = "> ";
-    let prompt_len = prompt.len() as u16;
-    let display_text = format!("{}{}", prompt, input.as_str());
+        // ── input box ──────────────────────────────────────────────────────────
+        let title = match res_status {
+            ResponseStatus::ReceiveResponse => " reading ",
+            ResponseStatus::Thinking => " thinking ",
+            ResponseStatus::Waiting => " message ",
+        };
+        let block = Block::default().borders(Borders::ALL).title(title);
+        let inner = block.inner(box_area);
 
-    let paragraph = Paragraph::new(display_text).block(block);
-    frame.render_widget(paragraph, box_area);
+        let prompt = "> ";
+        let prompt_len = prompt.len() as u16;
+        let display_text = format!("{}{}", prompt, input.as_str());
 
-    // Position the real terminal cursor (only when not in thinking mode)
-    if res_status == ResponseStatus::Waiting {
-        let cursor_x = inner.x + prompt_len + input.cursor() as u16;
-        let cursor_x = cursor_x.min(inner.x + inner.width.saturating_sub(1));
-        frame.set_cursor_position((cursor_x, inner.y));
+        let paragraph = Paragraph::new(display_text).block(block);
+        frame.render_widget(paragraph, box_area);
+
+        // Position the real terminal cursor (only when not in thinking mode)
+        if res_status == ResponseStatus::Waiting {
+            let cursor_x = inner.x + prompt_len + input.cursor() as u16;
+            let cursor_x = cursor_x.min(inner.x + inner.width.saturating_sub(1));
+            frame.set_cursor_position((cursor_x, inner.y));
+        }
+
+        // ── status line ────────────────────────────────────────────────────────
+        let status = Paragraph::new(Span::styled(
+            status_label.to_string(),
+            Style::default().fg(Color::DarkGray),
+        ));
+        frame.render_widget(status, status_area);
     }
-
-    // ── status line ────────────────────────────────────────────────────────
-    let status = Paragraph::new(Span::styled(
-        status_label.to_string(),
-        Style::default().fg(Color::DarkGray),
-    ));
-    frame.render_widget(status, status_area);
 }

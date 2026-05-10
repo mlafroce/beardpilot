@@ -1,4 +1,7 @@
-use std::{collections::HashMap, fmt::Display};
+use std::{
+    collections::{HashMap, VecDeque},
+    fmt::Display,
+};
 
 use beardpilot_api::endpoint::{
     chat::{ToolCallFunction, ToolCallMessage},
@@ -13,7 +16,7 @@ use crate::{
 
 pub struct ToolRegistry {
     tools: HashMap<String, Box<dyn ErasedTool>>,
-    queued_tool_calls: Vec<ToolCall>,
+    queued_tool_calls: VecDeque<ToolCall>,
 }
 
 impl ToolRegistry {
@@ -23,7 +26,10 @@ impl ToolRegistry {
         tools.insert("Find".to_owned(), Box::new(Find {}));
         tools.insert("ListFiles".to_owned(), Box::new(ListFiles {}));
         tools.insert("Bash".to_owned(), Box::new(Bash {}));
-        Self { tools, queued_tool_calls: vec![] }
+        Self {
+            tools,
+            queued_tool_calls: VecDeque::new(),
+        }
     }
 
     pub fn get_chat_tools(&self) -> Vec<Value> {
@@ -46,16 +52,16 @@ impl ToolRegistry {
             .map_err(|e| AppError::ToolError(e.to_string()))
     }
 
-    pub fn queue_tool_calls(&mut self, mut calls: Vec<ToolCall>) {
-        self.queued_tool_calls.append(&mut calls);
+    pub fn queue_tool_calls(&mut self, calls: Vec<ToolCall>) {
+        self.queued_tool_calls.extend(calls);
     }
 
     pub fn peek_pending_calls(&self) -> Option<&ToolCall> {
-        self.queued_tool_calls.last()
+        self.queued_tool_calls.front()
     }
 
     pub fn pop_pending_call(&mut self) -> Option<ToolCall> {
-        self.queued_tool_calls.pop()
+        self.queued_tool_calls.pop_front()
     }
 }
 

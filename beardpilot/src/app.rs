@@ -1,13 +1,12 @@
 use beardpilot_api::client::mistral::MistralClient;
-use beardpilot_api::endpoint::tool::Tool;
 use crossterm::event::EventStream;
 use futures_util::StreamExt;
 use tokio::sync::mpsc::{self, unbounded_channel, UnboundedSender};
 use tokio::task::JoinSet;
 
-use crate::chat::conversation::{Conversation, ModelInfo, ResponseAction, ResponseStatus};
+use crate::chat::conversation::{Conversation, ModelInfo, ResponseAction};
 use crate::chat::session::Session;
-use crate::chat::tool_registry::{ToolCall, ToolRegistry};
+use crate::chat::tool_registry::ToolRegistry;
 use crate::config::AppConfig;
 use crate::error::{AppError, AppResult};
 use crate::event::{AppEvent, SessionEvent, UiAction};
@@ -34,7 +33,10 @@ impl App {
         };
         let conversation = Conversation::new(config.system_prompt.clone(), model_info);
         let tool_registry = ToolRegistry::new();
-        let state = AppState { conversation, tool_registry };
+        let state = AppState {
+            conversation,
+            tool_registry,
+        };
         Ok(Self { config, tui, state })
     }
 
@@ -84,7 +86,11 @@ impl App {
         Ok(())
     }
 
-    async fn handle_submit(&mut self, session_sender: &UnboundedSender<SessionEvent>, text: String) {
+    async fn handle_submit(
+        &mut self,
+        session_sender: &UnboundedSender<SessionEvent>,
+        text: String,
+    ) {
         match self.state.tool_registry.pop_pending_call() {
             Some(tool_call) => {
                 if text == "y" {
@@ -93,13 +99,16 @@ impl App {
                     let response = self.state.tool_registry.call_tool(tool_call).await.unwrap();
                     self.state.conversation.push_tool_response(id, response);
                 }
-            },
+            }
             None => {
                 self.state.conversation.push_user(text);
             }
         }
         let _ = session_sender.send(SessionEvent::SendChat(
-        self.state.conversation.session_chat(&self.state.tool_registry)));
+            self.state
+                .conversation
+                .session_chat(&self.state.tool_registry),
+        ));
     }
 
     fn spawn_session_actor(

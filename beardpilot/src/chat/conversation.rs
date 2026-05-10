@@ -5,7 +5,7 @@ use beardpilot_api::endpoint::chat::{
 };
 
 use crate::{
-    chat::tool_registry::{self, ToolCall, ToolRegistry},
+    chat::tool_registry::{ToolCall, ToolRegistry},
     error::AppResult,
 };
 
@@ -29,15 +29,6 @@ pub enum ResponseAction {
 pub struct ModelInfo {
     pub model_name: String,
     pub max_tokens: Option<usize>,
-}
-
-impl ModelInfo {
-    pub fn new(model_name: impl Into<String>, max_tokens: Option<usize>) -> Self {
-        Self {
-            model_name: model_name.into(),
-            max_tokens,
-        }
-    }
 }
 
 #[derive(Clone, PartialEq)]
@@ -70,11 +61,6 @@ impl Conversation {
         }
     }
 
-    /// Return a reference to the model metadata.
-    pub fn model_info(&self) -> &ModelInfo {
-        &self.model_info
-    }
-
     pub fn push_user(&mut self, text: String) {
         let msg = LocalMessage::User(text);
         self.messages.push(msg);
@@ -97,14 +83,12 @@ impl Conversation {
         match response.done() {
             Some(FinishReason::ToolCalls) => {
                 Ok(ResponseAction::ToolCalls(self.tool_call_buffer.take()))
-            },
+            }
             Some(_) => {
                 self.append_token_usage(&response);
                 Ok(ResponseAction::Done)
-            },
-            None => {
-                Ok(ResponseAction::Streaming)
             }
+            None => Ok(ResponseAction::Streaming),
         }
     }
 
@@ -133,7 +117,7 @@ impl Conversation {
 
     /// If final token-usage data is present, append an info message.
     fn append_token_usage(&mut self, response: &ChatStreamResponse) {
-        if let Some(usage ) = &response.usage {
+        if let Some(usage) = &response.usage {
             let sent = usage.prompt_tokens.unwrap_or(0);
             let received = usage.completion_tokens;
             self.messages.push(LocalMessage::Info(format!(
