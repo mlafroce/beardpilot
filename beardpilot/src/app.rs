@@ -4,6 +4,8 @@ use futures_util::StreamExt;
 use tokio::sync::mpsc::{self, unbounded_channel, UnboundedSender};
 use tokio::task::JoinSet;
 
+use crate::chat::command::CommandOutput;
+use crate::chat::command_registry::CommandRegistry;
 use crate::chat::conversation::{Conversation, ModelInfo, ResponseAction};
 use crate::chat::session::Session;
 use crate::chat::tool_registry::ToolRegistry;
@@ -15,6 +17,8 @@ use crate::ui::tui::Tui;
 pub struct AppState {
     pub conversation: Conversation,
     pub tool_registry: ToolRegistry,
+    pub command_registry: CommandRegistry,
+    pub main_area_text: Option<String>,
 }
 
 /// Top-level application struct that owns all components and drives the main loop.
@@ -33,9 +37,12 @@ impl App {
         };
         let conversation = Conversation::new(config.system_prompt.clone(), model_info);
         let tool_registry = ToolRegistry::new();
+        let command_registry = CommandRegistry::new();
         let state = AppState {
             conversation,
             tool_registry,
+            command_registry,
+            main_area_text: None,
         };
         Ok(Self { config, tui, state })
     }
@@ -91,6 +98,18 @@ impl App {
         session_sender: &UnboundedSender<SessionEvent>,
         text: String,
     ) {
+        // Slash command activation
+        if let Some(rest) = text.strip_prefix('/') {
+            let (name, arg) = rest.split_once(' ').unwrap_or((rest, ""));
+            let output = self.state.command_registry.activate(name, arg);
+            self.handle_command_output(output);
+            return;
+        }
+        // Active command takes priority over llm chat
+        if let Some(output) = self.state.command_registry.handle_input(text.clone()) {
+            self.handle_command_output(output);
+            return;
+        }
         match self.state.tool_registry.pop_pending_call() {
             Some(tool_call) => {
                 if text == "y" {
@@ -109,6 +128,13 @@ impl App {
                 .conversation
                 .session_chat(&self.state.tool_registry),
         ));
+    }
+
+    fn handle_command_output(&mut self, output: CommandOutput) {
+        match output {
+            CommandOutput::Info(text) => self.state.main_area_text = Some(text),
+            CommandOutput::Finished => self.state.main_area_text = None,
+        }
     }
 
     fn spawn_session_actor(

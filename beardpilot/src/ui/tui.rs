@@ -73,8 +73,12 @@ impl Tui {
         self.terminal.draw(|frame| {
             let (msgs_area, notif_area, input_area) =
                 split_layout(frame.area(), notification.is_some());
-            self.message_area.render(frame, msgs_area, state);
-
+            if let Some(content) = &state.main_area_text {
+                self.message_area.render_text(frame, msgs_area, content);
+            } else {
+                self.message_area
+                    .render_conversation(frame, msgs_area, &state.conversation);
+            }
             if let (Some(area), Some(text)) = (notif_area, &notification) {
                 render_notification(frame, area, text);
             }
@@ -95,7 +99,6 @@ impl Tui {
     }
 
     fn handle_key(&mut self, key: KeyEvent) -> UiAction {
-        // Global quit shortcuts always work, even while thinking
         if matches!(
             key,
             KeyEvent {
@@ -110,10 +113,6 @@ impl Tui {
         ) {
             return UiAction::Quit;
         }
-
-        //if self.thinking {
-        //    return Ok(false);
-        //}
 
         match key.code {
             KeyCode::Enter => {

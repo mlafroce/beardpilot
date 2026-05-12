@@ -1,5 +1,6 @@
 mod app;
 mod chat;
+mod commands;
 mod config;
 mod error;
 mod event;

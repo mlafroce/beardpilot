@@ -1,7 +1,4 @@
-use crate::{
-    app::AppState,
-    chat::conversation::{Conversation, LocalMessage},
-};
+use crate::chat::conversation::{Conversation, LocalMessage};
 use ratatui::{
     layout::Rect,
     style::{Color, Modifier, Style},
@@ -9,6 +6,8 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Wrap},
     Frame,
 };
+
+const LINE_SOFT_PADDING: usize = 10;
 
 #[derive(Default)]
 pub struct TuiMainArea {
@@ -21,12 +20,10 @@ pub struct TuiMainArea {
 }
 
 impl TuiMainArea {
-    pub fn render(&mut self, frame: &mut Frame, area: Rect, state: &AppState) {
+    pub fn render_lines(&mut self, frame: &mut Frame, area: Rect, lines: Vec<Line<'_>>) {
+        self.total_messages_lines = lines.len() as u16;
         // We capture the two cached values from the draw call.
-        let messages_area_height = area.height;
-
-        let lines = Self::build_message_lines(&state.conversation, area.width.saturating_sub(2));
-        let total_messages_lines = lines.len() as u16;
+        self.messages_area_height = area.height;
 
         let msgs_paragraph = Paragraph::new(lines)
             .block(
@@ -38,15 +35,24 @@ impl TuiMainArea {
             .wrap(Wrap { trim: false })
             .scroll((self.scroll, 0));
         frame.render_widget(msgs_paragraph, area);
-        self.messages_area_height = messages_area_height;
-        self.total_messages_lines = total_messages_lines;
     }
-    /// Build all `Line`s to display in the messages pane.
-    ///
-    /// Long messages are pre-wrapped at `max_width` columns so the scroll-line
-    /// count stays accurate.
-    fn build_message_lines(conversation: &Conversation, max_width: u16) -> Vec<Line<'static>> {
+
+    pub fn render_text(&mut self, frame: &mut Frame, area: Rect, text: &str) {
+        let max_width: u16 = area.width.saturating_sub(2);
+        let wrapped = Self::soft_wrap(text, max_width as usize);
+
+        let lines = wrapped.iter().map(String::as_ref).map(Line::from).collect();
+        self.render_lines(frame, area, lines);
+    }
+
+    pub fn render_conversation(
+        &mut self,
+        frame: &mut Frame,
+        area: Rect,
+        conversation: &Conversation,
+    ) {
         let mut lines: Vec<Line<'static>> = Vec::new();
+        let max_width = area.width.saturating_sub(2);
 
         for msg in conversation.messages() {
             let mut msg_lines = Self::build_message_line(msg, max_width);
@@ -54,8 +60,7 @@ impl TuiMainArea {
             // blank line between messages
             lines.push(Line::from(""));
         }
-
-        lines
+        self.render_lines(frame, area, lines);
     }
 
     fn build_message_line(msg: &LocalMessage, max_width: u16) -> Vec<Line<'static>> {
@@ -148,12 +153,28 @@ impl TuiMainArea {
             let mut start = 0;
             while start < chars.len() {
                 let end = (start + width).min(chars.len());
-                result.push(chars[start..end].iter().collect());
-                start = end;
+
+                if end < chars.len() {
+                    // Overflow
+                    let soft_end = start + width.saturating_sub(LINE_SOFT_PADDING);
+                    let line_end = chars[soft_end..end]
+                        .iter()
+                        .rposition(|c| c.is_whitespace())
+                        .map(|i| soft_end + i)
+                        .unwrap_or(end); // fallback: hard break
+
+                    result.push(chars[start..line_end].iter().collect());
+                    // Skip the whitespace char we broke on, if any
+                    start = if chars[line_end].is_whitespace() {
+                        line_end + 1
+                    } else {
+                        line_end
+                    };
+                } else {
+                    result.push(chars[start..end].iter().collect());
+                    start = end;
+                }
             }
-        }
-        if result.is_empty() {
-            result.push(String::new());
         }
         result
     }
